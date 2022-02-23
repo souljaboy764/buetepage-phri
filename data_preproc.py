@@ -27,9 +27,9 @@ def vae_preproc(trajectories, window_length=40):
 		else:
 			sequences = np.vstack([sequences, traj_reshape])
 
-	return sequences
+	return np.array(sequences)
 
-def preproc(src_dir, no_augment=False, downsample_len=250):
+def preproc(src_dir, downsample_len=250):
 	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(4,1,1)
 	
 	train_data = []
@@ -119,17 +119,17 @@ if __name__=='__main__':
 						help='Path to save the processed trajectories to (default: ./data).')
 	parser.add_argument('--downsample-len', type=int, default=0, metavar='NEW_LEN',
 						help='Length to downsample trajectories to. If 0, no downsampling is performed (default: 0).')
-	parser.add_argument('--no-augment', action="store_true",
-						help='Whether to skip the trajectory augmentation or not. (default: False).')
+	# parser.add_argument('--no-augment', action="store_true",
+	# 					help='Whether to skip the trajectory augmentation or not. (default: False).')
 	args = parser.parse_args()
 	
-	train_data, train_labels, test_data, test_labels = preproc(args.src_dir, args.no_augment, args.downsample_len)
+	train_data, train_labels, test_data, test_labels = preproc(args.src_dir, args.downsample_len)
 
 	if args.dst_dir is not None:
 		if not os.path.exists(args.dst_dir):
 			os.mkdir(args.dst_dir)
 
-		if args.no_augment:
+		if args.downsample_len == 0:
 			np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences.npz'), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
 			vae_train_data = vae_preproc(train_data)
 			vae_test_data = vae_preproc(test_data)

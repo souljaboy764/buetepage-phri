@@ -7,7 +7,6 @@ from matplotlib.cm import get_cmap
 colors_10 = get_cmap('tab10')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
 def run_iters(iterator, model, optimizer):
 	iters = 0
 	total_recon = []
@@ -17,28 +16,22 @@ def run_iters(iterator, model, optimizer):
 		if model.training:
 			optimizer.zero_grad()
 		x = x.to(device)
-		x_gen, zx_samples, zx_mean, zx_std, zprior_samples = model(x)
+		x_gen, zpost_samples, zpost_dist = model(x)
+
 		recon_loss = F.mse_loss(x, x_gen, reduction='sum')
-
-		# KL Divergences
-		# zx_var = zx_std**2
-		# kl_div = torch.distributions.kl_divergence(zx_dist, model.z_prior).sum()
-		# kl_div = 0.5*(zx_mean**2 + zx_var - 1 - torch.log(zx_var)).sum()
-
-		# MMD
-		kl_div = MMD(zx_samples, zprior_samples)
-
+		kl_div = model.latent_loss(zpost_samples, zpost_dist)
 		loss = recon_loss/model.beta + kl_div
 
 		total_recon.append(recon_loss)
 		total_kl.append(kl_div)
 		total_loss.append(loss)
+
 		if model.training:
 			loss.backward()
 			optimizer.step()
 		iters += 1
 
-	return total_recon, total_kl, total_loss, x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims), zx_samples, x.reshape(-1, model.window_size, model.num_joints, model.joint_dims), iters
+	return total_recon, total_kl, total_loss, x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims), zpost_samples, x.reshape(-1, model.window_size, model.num_joints, model.joint_dims), iters
 
 def write_summaries(writer, recon, kl, loss, x_gen, zx_samples, x, steps_done, prefix):
 	writer.add_histogram(prefix+'/loss', sum(loss), steps_done)

@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os, datetime, argparse
 
-from networks import VAE
+import networks
 from config import global_config, human_vae_config
 from utils import *
 
@@ -15,16 +15,43 @@ parser.add_argument('--results', type=str, default='./logs/results/'+datetime.da
 					help='Path for saving results (default: ./logs/results/MMDDHHmm).')
 parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
 					help='Path to read training and testin data (default: ./data/orig/vae/data.npz).')
+parser.add_argument('--model', type=str, default='WAE', metavar='AE', choices=['AE', 'VAE', 'WAE'],
+					help='Path to read training and testin data (default: ./data/data/single_sample_per_action/data.npz).')					
 args = parser.parse_args()
 torch.manual_seed(128542)
 torch.autograd.set_detect_anomaly(True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-print("Creating Model and Optimizer")
 config = global_config()
 vae_config = human_vae_config()
-model = VAE(**(vae_config.__dict__)).to(device)
+
+DEFAULT_RESULTS_FOLDER = args.results
+MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
+SUMMARIES_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "summary")
+global_step = 0
+if not os.path.exists(DEFAULT_RESULTS_FOLDER):
+	print("Creating Result Directories")
+	os.makedirs(DEFAULT_RESULTS_FOLDER)
+	os.makedirs(MODELS_FOLDER)
+	os.makedirs(SUMMARIES_FOLDER)
+	np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, vae_config=vae_config)
+
+elif os.path.exists(os.path.join(MODELS_FOLDER,'hyperparams.npz')):
+	hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
+	args = hyperparams['args'].item() # overwrite args if loading from checkpoint
+	config = hyperparams['global_config'].item()
+	vae_config = hyperparams['vae_config'].item()
+
+print("Creating Model and Optimizer")
+model = getattr(networks, args.model)(**(vae_config.__dict__)).to(device)
 optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
+
+if os.path.exists(os.path.join(MODELS_FOLDER, 'final.pth')):
+	print("Loading Checkpoints")
+	ckpt = torch.load(os.path.join(MODELS_FOLDER, 'final.pth'))
+	model.load_state_dict(ckpt['model'])
+	optimizer.load_state_dict(ckpt['optimizer'])
+	global_step = ckpt['epoch']
 
 print("Reading Data")
 with np.load(args.src, allow_pickle=True) as data:
@@ -33,28 +60,11 @@ with np.load(args.src, allow_pickle=True) as data:
 	train_iterator = DataLoader(train_data, batch_size=model.batch_size, shuffle=True)
 	test_iterator = DataLoader(test_data, batch_size=model.batch_size, shuffle=True)
 
-DEFAULT_RESULTS_FOLDER = args.results
-MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
-SUMMARIES_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "summary")
-global_step = 0
-if os.path.exists(DEFAULT_RESULTS_FOLDER) and os.path.exists(os.path.join(MODELS_FOLDER, 'final.pth')):
-	print("Loading Checkpoints")
-	ckpt = torch.load(os.path.join(MODELS_FOLDER, 'final.pth'))
-	model.load_state_dict(ckpt['model'])
-	optimizer.load_state_dict(ckpt['optimizer'])
-	global_step = ckpt['epoch']
-elif not os.path.exists(DEFAULT_RESULTS_FOLDER):
-	print("Creating Result Directories")
-	os.makedirs(DEFAULT_RESULTS_FOLDER)
-	os.makedirs(MODELS_FOLDER)
-	os.makedirs(SUMMARIES_FOLDER)
-
 print("Building Writer")
 writer = SummaryWriter(SUMMARIES_FOLDER)
-# x_gen,_,_  = model(torch.Tensor(test_data[:10]).to(device))
-model.eval()
-writer.add_graph(model, torch.Tensor(test_data[:10]).to(device))
-model.train()
+# model.eval()
+# writer.add_graph(model, torch.Tensor(test_data[:10]).to(device))
+# model.train()
 s = ''
 for k in config.__dict__:
 	s += str(k) + ' : ' + str(config.__dict__[k]) + '\n'
@@ -76,6 +86,8 @@ for epoch in range(config.EPOCHS):
 	params = []
 	grads = []
 	for name, param in model.named_parameters():
+		if param.grad is None:
+			continue
 		writer.add_histogram('grads/'+name, param.grad.reshape(-1), steps_done)
 		writer.add_histogram('param/'+name, param.reshape(-1), steps_done)
 		if torch.allclose(param.grad, torch.zeros_like(param.grad)):

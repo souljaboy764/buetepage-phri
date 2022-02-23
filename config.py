@@ -24,7 +24,6 @@ class human_vae_config:
 		self.z_prior_mean = 0
 		self.z_prior_std = 1
 
-
 class robot_vae_config:
 	def __init__(self):
 		config = global_config()
@@ -35,7 +34,6 @@ class robot_vae_config:
 		self.hidden_sizes = [250, 150]
 		self.latent_dim = 7
 		self.activation = 'ReLU'
-
 
 class tdm_config:
 	def __init__(self):
