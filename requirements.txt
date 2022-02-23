@@ -1,2 +1,6 @@
 torch
 numpy
+matplotlib
+tensorboard
+torch-tb-profiler
+future

@@ -9,6 +9,7 @@ class VAE(nn.Module):
 		for key in kwargs:
 			setattr(self, key, kwargs[key])
 
+		self.activation = getattr(nn, kwargs['activation'])()
 		self.input_dim = self.num_joints * self.joint_dims * self.window_size
 		
 		enc_sizes = [self.input_dim] + self.hidden_sizes
@@ -29,16 +30,19 @@ class VAE(nn.Module):
 			dec_layers.append(self.activation)
 		self._decoder = nn.Sequential(*dec_layers)
 
+		# self.z_prior = torch.distributions.Normal(self.z_prior_mean, self.z_prior_std)
+
 	def forward(self, x):
 
 		enc = self._encoder(x)
 
-		zx_dist = Normal(self.latent_mean(enc), self.latent_std(enc))
-		zx_samples = zx_dist.rsample()
+		zx_mean = self.latent_mean(enc)
+		zx_std = self.latent_std(enc)
+		zx_samples = zx_mean + torch.rand_like(zx_mean) * zx_std
 
 		x_gen = self._decoder(zx_samples)
 
-		return x_gen, zx_samples, zx_dist
+		return x_gen, zx_samples, zx_mean, zx_std
 
 class TDM(nn.Module):
 	def __init__(self, **kwargs):
@@ -46,6 +50,7 @@ class TDM(nn.Module):
 		for key in kwargs:
 			setattr(self, key, kwargs[key])
 
+		self.activation = getattr(nn, kwargs['activation'])()
 		self.input_dim = self.num_joints * self.joint_dims + self.num_actions
 		
 		enc_sizes = [self.input_dim] + self.encoder_sizes
