@@ -4,13 +4,11 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.cm import get_cmap
-colors_10 = get_cmap('tab10')
 import os, datetime, argparse
 
 from networks import VAE
 from config import global_config, human_vae_config
+from utils import *
 
 parser = argparse.ArgumentParser(description='SKID Training')
 parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
@@ -69,75 +67,12 @@ writer.add_text('human_vae_config', s)
 
 writer.flush()
 
-def run_iters(iterator):
-	iters = 0
-	total_recon = []
-	total_kl = []
-	total_loss = []
-	for i, x in enumerate(train_iterator):
-		if model.training:
-			optimizer.zero_grad()
-		x = x.to(device)
-		x_gen, zx_samples, zx_mean, zx_std = model(x)
-		zx_var = zx_std**2
-		recon_loss = F.mse_loss(x, x_gen)
-		# kl_div = torch.distributions.kl_divergence(zx_dist, model.z_prior).sum()
-		kl_div = 0.5*(zx_mean**2 + zx_var - 1 - torch.log(zx_var)).sum()
-		loss = recon_loss + model.beta*kl_div
-
-		total_recon.append(recon_loss)
-		total_kl.append(kl_div)
-		total_loss.append(loss)
-		if model.training:
-			loss.backward()
-			optimizer.step()
-		iters += 1
-
-	return total_recon, total_kl, total_loss, x_gen, zx_samples, x, iters
-
-def write_summaries(recon, kl, loss, x_gen, zx_samples, x, steps_done, prefix):
-	writer.add_histogram(prefix+'/loss', sum(loss), steps_done)
-	writer.add_scalar(prefix+'/kl_div', sum(kl), steps_done)
-	writer.add_scalar(prefix+'/recon_loss', sum(recon), steps_done)
-	
-	writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
-
-	x_gen = x_gen[:5].reshape(5, model.window_size, model.num_joints, model.joint_dims)
-	x = x[:5].reshape(5, model.window_size, model.num_joints, model.joint_dims)
-	
-	fig, ax = plt.subplots(nrows=5, ncols=model.num_joints, figsize=(28, 16), sharex=True, sharey=True)
-	fig.tight_layout(pad=0, h_pad=0, w_pad=0)
-
-	plt.subplots_adjust(
-		left=0.05,  # the left side of the subplots of the figure
-		right=0.95,  # the right side of the subplots of the figure
-		bottom=0.05,  # the bottom of the subplots of the figure
-		top=0.95,  # the top of the subplots of the figure
-		wspace=0.05,  # the amount of width reserved for blank space between subplots
-		hspace=0.05,  # the amount of height reserved for white space between subplots
-	)
-	x = x.cpu().detach().numpy()
-	x_gen = x_gen.cpu().detach().numpy()
-	for i in range(5):
-		for j in range(model.num_joints):
-			ax[i][j].set(xlim=(0, model.window_size))
-			color_counter = 0
-			for dim in range(model.joint_dims):
-				ax[i][j].plot(x[i, :, j, dim], color=colors_10(color_counter%10))
-				ax[i][j].plot(x_gen[i, :, j, dim], linestyle='--', color=colors_10(color_counter % 10))
-				color_counter += 1
-
-	fig.canvas.draw()
-	writer.add_figure('sample reconstruction', fig, steps_done)
-	plt.close(fig)
-
-
 print("Starting Epochs")
 for epoch in range(config.EPOCHS):
 	model.train()
-	train_recon, train_kl, train_loss, x_gen, zx_samples, x, iters = run_iters(train_iterator)
+	train_recon, train_kl, train_loss, x_gen, zx_samples, x, iters = run_iters(train_iterator, model, optimizer)
 	steps_done = (epoch+1)*iters
-	write_summaries(train_recon, train_kl, train_loss, x_gen, zx_samples, x, steps_done, 'train')
+	write_summaries(writer, train_recon, train_kl, train_loss, x_gen, zx_samples, x, steps_done, 'train')
 	params = []
 	grads = []
 	for name, param in model.named_parameters():
@@ -148,13 +83,12 @@ for epoch in range(config.EPOCHS):
 	
 	model.eval()
 	with torch.no_grad():
-		test_recon, test_kl, test_loss, x_gen, zx_samples, x, iters = run_iters(test_iterator)
-		write_summaries(test_recon, test_kl, test_loss, x_gen, zx_samples, x, steps_done, 'test')
+		test_recon, test_kl, test_loss, x_gen, zx_samples, x, iters = run_iters(test_iterator, model, optimizer)
+		write_summaries(writer, test_recon, test_kl, test_loss, x_gen, zx_samples, x, steps_done, 'test')
 
 	if epoch % config.EPOCHS_TO_SAVE == 0:
 		checkpoint_file = os.path.join(MODELS_FOLDER, '%0.4d.pth'%(epoch))
 		torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, checkpoint_file)
-		
 
 	print(epoch,'epochs done')
 
