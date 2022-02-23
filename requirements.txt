@@ -4,3 +4,4 @@ matplotlib
 tensorboard
 torch-tb-profiler
 future
+joblib
