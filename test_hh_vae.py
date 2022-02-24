@@ -11,6 +11,7 @@ from matplotlib.cm import get_cmap
 from matplotlib.animation import FFMpegWriter
 import argparse, os
 from joblib import Parallel, delayed
+
 import networks
 from config import human_vae_config
 
@@ -55,7 +56,7 @@ ax.set(ylim3d=(-0.5, 0.5), ylabel='Y')
 ax.set(zlim3d=(-0.5, 0.5), zlabel='Z')
 
 current_point_recon, = ax.plot([], [], [], '-ko',  mfc='blue', mec='k')
-window_points_recon, = ax.plot([], [], [], '--ko', mfc='blue', mec='k', alpha=0.3)
+window_points_recon = [ax.plot([], [], [], '--ko', mfc='blue', mec='k', alpha=0.3)[0] for j in range(1, model.window_size, model.window_size//10)]
 
 current_point_gt, = ax.plot([], [], [], '-ko', mfc='green', mec='k')
 
@@ -63,10 +64,13 @@ def set_points_and_edges(edges_plot, points): # points.shape == N, 3
     edges_plot.set_data(points[:,:2].T)
     edges_plot.set_3d_properties(points[:,2])
 
-with writer.saving(fig, "writer_test_window.mp4", 300):
+with writer.saving(fig, "writer_test_windows.mp4", 300):
     for i in range(x_gen.shape[0]):
         set_points_and_edges(current_point_recon, x_gen[i,0])
         set_points_and_edges(current_point_gt, test_data[i,0])
-        Parallel(n_jobs=model.window_size//8)(delayed(set_points_and_edges)(window_points_recon, x_gen[i,j]) for j in range(1, model.window_size, model.window_size//8))
+        for j in range(1, model.window_size, model.window_size//10):
+            idx = (j-1)*10//model.window_size
+            set_points_and_edges(window_points_recon[idx], x_gen[i,j])
+        # Parallel(n_jobs=model.window_size//8)(delayed(set_points_and_edges)(window_points_recon, x_gen[i,j]) for j in range(1, model.window_size, model.window_size//8))
         writer.grab_frame()
         print(i)
