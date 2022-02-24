@@ -26,7 +26,7 @@ def run_iters_vae(iterator, model, optimizer):
 		x = x.to(device)
 		x_gen, zpost_samples, zpost_dist = model(x)
 
-		recon_loss = F.mse_loss(x, x_gen, reduction='sum')
+		recon_loss = F.mse_loss(x, x_gen, reduction='mean')
 		kl_div = model.latent_loss(zpost_samples, zpost_dist)
 		loss = recon_loss/model.beta + kl_div
 

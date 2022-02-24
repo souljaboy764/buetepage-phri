@@ -25,7 +25,7 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 		if tdm.training:
 			optimizer.zero_grad()
 		batch_size, seq_len, dims = x.shape
-		mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) > lens.unsqueeze(1).repeat(1,seq_len)
+		mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
 		x1_tdm = x[:,:,p1_tdm_idx]
 		x2_tdm = x[:,:,p2_tdm_idx]
 		x1_vae = x[:,:,p1_vae_idx]
@@ -37,13 +37,17 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 			zx1_dist = vae(x1_vae.to(device), True)
 			zx2_dist = vae(x2_vae.to(device), True)
 
-		kl_loss_1 = torch.distributions.kl_divergence(zd1_dist, zx1_dist)[mask].mean()*1e-20
-		kl_loss_2 = torch.distributions.kl_divergence(zd2_dist, zx2_dist)[mask].mean()*1e-20
+		kl_loss_1 = torch.distributions.kl_divergence(zd1_dist, zx1_dist)[mask].mean()
+		kl_loss_2 = torch.distributions.kl_divergence(zd2_dist, zx2_dist)[mask].mean()
 		
-		d1_probs = d1_dist.log_prob(d1_samples).exp()[mask]
-		d2_probs = d2_dist.log_prob(d2_samples).exp()[mask]
-		m = 0.5*(d1_probs + d2_probs)
-		jsd = 0.5*F.kl_div(d1_probs, m, reduction='sum', log_target=True) + 0.5*F.kl_div(d2_probs, m, reduction='sum', log_target=True)
+		d1_logprobs = d1_dist.log_prob(d1_samples)[mask]
+		d1_probs = d1_logprobs.exp()
+		d2_logprobs = d2_dist.log_prob(d2_samples)[mask]
+		d2_probs = d2_logprobs.exp()
+		m_log = torch.log(0.5*(d1_probs + d2_probs))
+		# jsd = 0.5*F.kl_div(d1_probs, m, reduction='mean') + 0.5*F.kl_div(d2_probs, m, reduction='mean')
+		jsd = 0.5*d1_probs*(d1_logprobs - m_log) + 0.5*d2_probs*(d2_logprobs - m_log)
+		jsd = jsd.mean()
 
 		loss = kl_loss_1 + kl_loss_2 + jsd
 		
@@ -68,7 +72,10 @@ def write_summaries_tdm(writer, loss, jsd, kl_1, kl_2, d1_samples, d2_samples, s
 	d = torch.concat([d1_samples[:100], d2_samples[:100]], dim=0)
 	d_labels = torch.concat([torch.ones(100), torch.ones(100)+1],dim=0)
 
-	writer.add_embedding(d, metadata=d_labels, global_step=steps_done, tag=prefix+'/q(d|z)')
+	writer.add_histogram('latents/d1_samples', d1_samples.mean(0), steps_done)
+	writer.add_histogram('latents/d2_samples', d2_samples.mean(0), steps_done)
+
+	# writer.add_embedding(d, metadata=d_labels, global_step=steps_done, tag=prefix+'/q(d|z)')
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
@@ -84,11 +91,13 @@ if __name__=='__main__':
 	config = global_config()
 	tdm_config = human_tdm_config()
 
-	DEFAULT_RESULTS_FOLDER = os.path.dirname(os.path.dirname(args.vae_ckpt))
-	MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
+	DEFAULT_RESULTS_FOLDER = os.path.join(os.path.dirname(os.path.dirname(args.vae_ckpt)))
+	VAE_MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
+	MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, 'tdm', "models")
+	os.makedirs(MODELS_FOLDER,exist_ok=True)
 	SUMMARIES_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "summary")
 	global_step = 0
-	if not os.path.exists(DEFAULT_RESULTS_FOLDER) and os.path.exists(os.path.join(MODELS_FOLDER, 'final.pth')):
+	if not os.path.exists(DEFAULT_RESULTS_FOLDER) and os.path.exists(os.path.join(VAE_MODELS_FOLDER, 'final.pth')):
 		print('Please use the same directory as the final VAE model')
 		exit(-1)
 
@@ -100,7 +109,7 @@ if __name__=='__main__':
 	else:
 		np.savez_compressed(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz'), args=args, global_config=config, tdm_config=tdm_config)
 
-	vae_hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
+	vae_hyperparams = np.load(os.path.join(VAE_MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
 	vae_args = vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
 	vae_config = vae_hyperparams['vae_config'].item()
 
@@ -116,7 +125,7 @@ if __name__=='__main__':
 		global_step = ckpt['epoch']
 
 	vae = getattr(networks, vae_args.model)(**(vae_config.__dict__)).to(device)
-	ckpt = torch.load(os.path.join(MODELS_FOLDER, 'final.pth'))
+	ckpt = torch.load(os.path.join(VAE_MODELS_FOLDER, 'final.pth'))
 	vae.load_state_dict(ckpt['model'])
 	vae.eval()
 

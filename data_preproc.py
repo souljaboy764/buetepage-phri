@@ -34,6 +34,17 @@ def vae_tdm_preproc(trajectories, labels, window_length=40):
 
 	return np.array(vae_inputs), np.array(sequences)
 
+def vrnn_preproc_downsamples(trajectories, labels, window_length=40):
+	vae_inputs = []
+	sequences = []
+	num_trajs, traj_len, num_joints, dims = trajectories.shape
+	idx = np.array([np.arange(i,i+window_length) for i in range(traj_len + 1 - window_length)])
+	vrnn_inputs = trajectories[:,idx].reshape((num_trajs, traj_len + 1 - window_length, window_length*num_joints*dims))
+	sequences = np.concatenate([vrnn_inputs,labels[:, :traj_len + 1 - window_length]],axis=-1)
+
+	return np.array(vrnn_inputs), np.array(sequences)
+
+
 def preproc(src_dir, downsample_len=250):
 	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(4,1,1)
 	
@@ -66,13 +77,13 @@ def preproc(src_dir, downsample_len=250):
 				traj2 = data_p2[s[0]:s[1], idx_list] # seq_len, 4 ,3
 				traj = np.concatenate([traj1, traj2], axis=-1)
 				traj = traj - traj[0,0]
-				downsample = int((s[1] - s[0])*0.4)
-				if downsample > 0:
+				# downsample = int((s[1] - s[0])*0.4)
+				if downsample_len > 0:
 					traj = traj.transpose(1,2,0) # 4, 3, seq_len
 					traj = torch.Tensor(traj).to(device).unsqueeze(2) # 4, 3, 1 seq_len
 					traj = torch.concat([traj, torch.zeros_like(traj)], dim=2) # 4, 3, 2 seq_len
 					
-					grid = affine_grid(theta, torch.Size([4, 3, 2, downsample]), align_corners=True)
+					grid = affine_grid(theta, torch.Size([4, 3, 2, downsample_len]), align_corners=True)
 					traj = grid_sample(traj.type(torch.float32), grid, align_corners=True) # 4, 3, 2 new_length
 					traj = traj[:, :, 0].cpu().detach().numpy() # 4, 3, new_length
 					traj = traj.transpose(2,0,1) # new_length, 4, 3
@@ -112,12 +123,14 @@ def preproc(src_dir, downsample_len=250):
 
 		B = torch.Tensor(np.linalg.pinv(M) * 1e-6).to(device)
 		L = torch.linalg.cholesky(B) # faster/momry-friendly to directly give cholesky
-		
-		for i in range(len(train_data)):
-			augments = torch.distributions.MultivariateNormal(torch.Tensor(train_data[i]).to(device).reshape(12, downsample_len), scale_tril=L).sample((100,)).cpu().numpy()
-			train_data = np.concatenate([train_data,augments.reshape(100, downsample_len, 4, 3)], 0)
+		num_trajs = len(train_data)
+		n_augments = 30
+		for i in range(num_trajs):
+			augments = torch.distributions.MultivariateNormal(torch.Tensor(train_data[i]).to(device).reshape(24, downsample_len), scale_tril=L).sample((n_augments,)).cpu().numpy()
+			train_data = np.concatenate([train_data,augments.reshape(n_augments, downsample_len, 4, 6)], 0)
 			train_labels = np.concatenate([train_labels,np.repeat(train_labels[i:i+1], augments.shape[0], axis=0)], 0)
-
+		print('Augmented Sequences: Training',train_data.shape, 'Testing', test_data.shape)
+		print('Augmented Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
 	return train_data, train_labels, test_data, test_labels
 
 if __name__=='__main__':
@@ -148,3 +161,10 @@ if __name__=='__main__':
 			np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
 		else:
 			np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences_augmented.npz'), data=train_data, labels=train_labels)
+			vae_train_data, tdm_train_data = vrnn_preproc_downsamples(train_data, train_labels)
+			vae_test_data, tdm_test_data = vrnn_preproc_downsamples(test_data, test_labels)
+			print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
+			print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
+			np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=vae_train_data, test_data=vae_test_data)
+			np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
+
