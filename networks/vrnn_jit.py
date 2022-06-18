@@ -1,5 +1,5 @@
 import torch
-from torch import nn
+from torch import nn, jit
 from torch.nn import functional as F
 from torch.distributions import Normal, kl_divergence
 from torch.nn.utils.rnn import *
@@ -7,14 +7,14 @@ from torch.nn.utils.rnn import *
 from networks import WAE
 from utils import MMD
 
-class VRNN(nn.Module):
+class VRNNCell(jit.ScriptModule):
 	def __init__(self, **kwargs):
-		super(VRNN, self).__init__()
+		super(VRNNCell, self).__init__()
 		for key in kwargs:
 			setattr(self, key, kwargs[key])
 
 		self.activation = getattr(nn, kwargs['activation'])()
-		self.input_dim = self.num_joints * self.joint_dims
+		self.input_dim = self.num_joints * self.joint_dims * self.window_size
 		
 		self.enc_sizes = [self.input_dim] + self.hidden_sizes
 		enc_layers = []
@@ -39,6 +39,7 @@ class VRNN(nn.Module):
 		self._decoder = nn.Sequential(*dec_layers)
 		self._output = nn.Linear(self.dec_sizes[-1], self.input_dim) 
 	
+	@jit.script_method
 	def forward(self, x, hidden):
 		enc = self._encoder(x)
 		enc = self.activation(enc)
@@ -56,22 +57,22 @@ class VRNN(nn.Module):
 	def latent_loss(self, zpost_samples, zprior_samples):
 		return MMD(zpost_samples, zprior_samples)
 
-# class VRNN(nn.Module):
-# 	def __init__(self, **cell_args):
-# 		super(VRNN, self).__init__()
-# 		self.cell = VRNNCell(**cell_args)
+class VRNN(jit.ScriptModule):
+	def __init__(self, **cell_args):
+		super(VRNN, self).__init__()
+		self.cell = VRNNCell(**cell_args)
 
-# 	def forward(self, input, state):
-# 		# type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
-# 		inputs = input.unbind(1)
-# 		zpost_samples = torch.jit.annotate(List[Tensor], [])
-# 		zprior_samples = torch.jit.annotate(List[Tensor], [])
-# 		kl_loss = torch.jit.annotate(List[Tensor], [])
-# 		gen = torch.jit.annotate(List[Tensor], [])
-# 		for i in range(len(inputs)):
-# 			gen_i, zpost_sample, zpost_dist, zprior_dist, state = self.cell(inputs[i], state)
-# 			gen += [gen_i]
-# 			zpost_samples += [zpost_sample]
-# 			zprior_samples += [zprior_dist[0] + zprior_dist[1]*torch.rand_like(zprior_dist[0])]
-# 			kl_loss += [self.cell.latent_loss(zpost_samples[-1], zprior_samples[-1])]
-# 		return gen, torch.stack(zpost_samples), torch.stack(zprior_samples), torch.stack(kl_loss), state
+	@jit.script_method
+	def forward(self, input, state):
+		# type: (Tensor, Tuple[Tensor, Tensor]) -> Tuple[Tensor, Tuple[Tensor, Tensor]]
+		inputs = input.unbind(0)
+		zpost_samples = torch.jit.annotate(List[Tensor], [])
+		zprior_samples = torch.jit.annotate(List[Tensor], [])
+		kl_loss = torch.jit.annotate(List[Tensor], [])
+		gen = torch.zeros_like(input)
+		for i in range(len(inputs)):
+			gen[i], zpost_sample, zpost_dist, zprior_dist, state = self.cell(inputs[i], state)
+			zpost_samples += [zpost_sample]
+			zprior_samples += [zprior_dist[0] + zprior_dist[1]*torch.rand_like(zprior_dist[0])]
+			kl_loss += [self.cell.latent_loss(zpost_samples[-1], zprior_samples[-1])]
+		return gen, torch.stack(zpost_samples), torch.stack(zprior_samples), torch.stack(kl_loss), state
