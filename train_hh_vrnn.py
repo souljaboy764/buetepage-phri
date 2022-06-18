@@ -6,7 +6,7 @@ from torch.utils.tensorboard import SummaryWriter
 import numpy as np
 import os, datetime, argparse
 
-import networks
+from networks import VRNN
 from config import global_config, human_vae_config
 
 import matplotlib.pyplot as plt
@@ -24,10 +24,26 @@ def run_iters_vae(iterator, model, optimizer):
 		if model.training:
 			optimizer.zero_grad()
 		x = x.to(device)
-		x_gen, zpost_samples, zpost_dist = model(x)
-
+		batch_recon_loss = []
+		batch_total_loss = []
+		batch_zpost_samples = []
+		batch_zprior_samples = []
+		hiddens = []
+		# @torch.jit.script
+		def run_loop(x):
+			batch_kl_loss = []
+			x_gen = torch.zeros_like(x)
+			hidden = torch.zeros(x.shape[0], model.latent_dim).to(device)
+			for t in range(x.shape[1]):
+				x_gen[:, t], zpost_samples, zpost_dist, zprior_dist, hidden = model(x[:, t], hidden)
+				zprior_samples = zprior_dist[0] + zprior_dist[1]*torch.rand_like(zprior_dist[0])
+				batch_kl_loss.append(model.latent_loss(zpost_samples, zprior_samples))
+			return batch_kl_loss, x_gen, zpost_samples
+		# state = torch.zeros(x.shape[0], model.latent_dim).to(device)
+		# x_gen, zpost_samples, zprior_samples, batch_kl_loss, state =  model(x, state)
+		batch_kl_loss, x_gen, zpost_samples = run_loop(x)
 		recon_loss = F.mse_loss(x, x_gen, reduction='mean')
-		kl_div = model.latent_loss(zpost_samples, zpost_dist)
+		kl_div = torch.stack(batch_kl_loss, dim=0).mean()
 		loss = recon_loss/model.beta + kl_div
 
 		total_recon.append(recon_loss)
@@ -79,12 +95,11 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
-	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
-						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
-	parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
-						help='Path to read training and testin data (default: ./data/orig/vae/data.npz).')
-	parser.add_argument('--model', type=str, default='WAE', metavar='ARCH', choices=['AE', 'VAE', 'WAE'],
-						help='Path to read training and testin data (default: ./data/data/single_sample_per_action/data.npz).')					
+	parser.add_argument('--results', type=str, default='./logs/vrnn_debug'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
+						help='Path for saving results (default: ./logs/vrnn_debug).')
+	parser.add_argument('--src', type=str, default='./data/vrnn_subsampled/labelled_sequences_augmented.npz', metavar='SRC',
+						help='Path to read training and testin data (default: ./data/vrnn_subsampled/labelled_sequences_augmented.npz).')
+	
 	args = parser.parse_args()
 	torch.manual_seed(128542)
 	torch.autograd.set_detect_anomaly(True)
@@ -111,7 +126,11 @@ if __name__=='__main__':
 		vae_config = hyperparams['vae_config'].item()
 
 	print("Creating Model and Optimizer")
-	model = getattr(networks, args.model)(**(vae_config.__dict__)).to(device)
+	# test_seq = torch.FloatTensor(vae_config.batch_size, 450, 480).random_(0, 1).to(device)
+	# test_hidden = torch.FloatTensor(vae_config.batch_size, vae_config.latent_dim).random_(0, 1).to(device)
+	
+	model = VRNN(**(vae_config.__dict__)).to(device)
+	# model = torch.jit.trace(model,(test_seq,test_hidden))
 	optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
 
 	if os.path.exists(os.path.join(MODELS_FOLDER, 'final.pth')):
@@ -125,15 +144,15 @@ if __name__=='__main__':
 	with np.load(args.src, allow_pickle=True) as data:
 		train_data = np.array(data['train_data']).astype(np.float32)
 		test_data = np.array(data['test_data']).astype(np.float32)
-		num_samples, dim = train_data.shape
-		train_p1 = train_data[:, :dim//2]
-		train_p2 = train_data[:, dim//2:]
-		test_p1 = test_data[:, :dim//2]
-		test_p2 = test_data[:, dim//2:]
-		train_data = np.vstack([train_p1, train_p2])
-		test_data = np.vstack([test_p1, test_p2])
-		train_iterator = DataLoader(train_data, batch_size=model.batch_size, shuffle=True)
-		test_iterator = DataLoader(test_data, batch_size=model.batch_size, shuffle=True)
+		batch_size, seq_len, joints, dim = train_data.shape
+		train_p1 = train_data[:, ::2, :, :dim//2]
+		train_p2 = train_data[:, ::2, :, dim//2:]
+		test_p1 = test_data[:, ::2, :, :dim//2]
+		test_p2 = test_data[:, ::2, :, dim//2:]
+		train_data = np.concatenate([train_p1, train_p2], axis=0).reshape((-1, seq_len//2, joints*dim//2))
+		test_data = np.concatenate([test_p1, test_p2], axis=0).reshape((-1, seq_len//2, joints*dim//2))
+		train_iterator = DataLoader(train_data, batch_size=vae_config.batch_size, shuffle=True)
+		test_iterator = DataLoader(test_data, batch_size=vae_config.batch_size, shuffle=True)
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
