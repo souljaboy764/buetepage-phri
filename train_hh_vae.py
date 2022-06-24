@@ -11,11 +11,12 @@ from config import global_config, human_vae_config
 
 import matplotlib.pyplot as plt
 from matplotlib.cm import get_cmap
+import pbdlib
 
 colors_10 = get_cmap('tab10')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def run_iters_vae(iterator, model, optimizer):
+def run_iters_vae(iterator, lens, model, optimizer):
 	iters = 0
 	total_recon = []
 	total_kl = []
@@ -26,12 +27,12 @@ def run_iters_vae(iterator, model, optimizer):
 		x = x.to(device)
 		x_gen, zpost_samples, zpost_dist = model(x)
 
-		recon_loss = F.mse_loss(x, x_gen, reduction='mean')
+		recon_loss = F.mse_loss(x, x_gen, reduction='sum')
 		kl_div = model.latent_loss(zpost_samples, zpost_dist)
 		loss = recon_loss/model.beta + kl_div
 
 		total_recon.append(recon_loss)
-		total_kl.append(kl_div)
+		total_kl.append(kl_div) 
 		total_loss.append(loss)
 
 		if model.training:
@@ -46,7 +47,7 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 	writer.add_scalar(prefix+'/kl_div', sum(kl), steps_done)
 	writer.add_scalar(prefix+'/recon_loss', sum(recon), steps_done)
 	
-	writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
+	# writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
 	batch_size, window_size, num_joints, joint_dims = x_gen.shape
 	x_gen = x_gen[:5]
 	x = x[:5]
@@ -81,9 +82,13 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
 	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
 						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
-	parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
+	parser.add_argument('--src', type=str, default='./data/ae_bip_downsampled/vae_data.npz', metavar='RES',
 						help='Path to read training and testin data (default: ./data/orig/vae/data.npz).')
-	parser.add_argument('--model', type=str, default='WAE', metavar='ARCH', choices=['AE', 'VAE', 'WAE'],
+	parser.add_argument('--prior', type=str, default='HSMM', metavar='P(Z)', choices=['None', 'RNN', 'BIP', 'HSMM'],
+						help='Which prior to use for the VAE (default: None')	
+	parser.add_argument('--hsmm-components', type=int, default=6, metavar='N_COMPONENTS', 
+						help='Number of components to use in HSMM Prior (default: 6).')						
+	parser.add_argument('--model', type=str, default='VAE', metavar='ARCH', choices=['AE', 'VAE', 'WAE'],
 						help='Path to read training and testin data (default: ./data/data/single_sample_per_action/data.npz).')					
 	args = parser.parse_args()
 	torch.manual_seed(128542)
@@ -123,18 +128,35 @@ if __name__=='__main__':
 
 	print("Reading Data")
 	with np.load(args.src, allow_pickle=True) as data:
-		train_data = np.array(data['train_data']).astype(np.float32)
-		test_data = np.array(data['test_data']).astype(np.float32)
-		num_samples, dim = train_data.shape
-		train_p1 = train_data[:, :dim//2]
-		train_p2 = train_data[:, dim//2:]
-		test_p1 = test_data[:, :dim//2]
-		test_p2 = test_data[:, dim//2:]
-		train_data = np.vstack([train_p1, train_p2])
-		test_data = np.vstack([test_p1, test_p2])
-		train_iterator = DataLoader(train_data, batch_size=model.batch_size, shuffle=True)
-		test_iterator = DataLoader(test_data, batch_size=model.batch_size, shuffle=True)
+		train_data, train_lens = np.array(data['train_data'])
+		train_data = train_data.astype(np.float32)
+		train_lens = train_lens.astype(np.int32)
+		train_segs = np.cumsum(train_lens)
+		train_actidx = np.array([[0,24],[24,54],[54,110],[110,149]])
 
+		test_data, test_lens = np.array(data['test_data'])
+		test_data = test_data.astype(np.float32)
+		test_lens = test_lens.astype(np.int32)
+		test_segs = np.cumsum(test_lens)
+		test_actidx = np.array([[0,7],[7,15],[15,29],[29,39]])
+		
+		# train_data = np.array(data['train_data']).astype(np.float32)
+		# test_data = np.array(data['test_data']).astype(np.float32)
+		num_samples, dim = train_data.shape
+		# train_p1 = train_data[:, :dim//2]
+		# train_p2 = train_data[:, dim//2:]
+		# test_p1 = test_data[:, :dim//2]
+		# test_p2 = test_data[:, dim//2:]
+		# train_data = np.vstack([train_p1, train_p2])
+		# test_data = np.vstack([test_p1, test_p2])
+		train_iterator = DataLoader(torch.Tensor(train_data).to(device), batch_size=model.batch_size, shuffle=True)
+		train_iterator.segments = train_segs
+		train_iterator.action_idx = train_actidx
+		train_iterator.seq_lens = train_lens
+		test_iterator = DataLoader(torch.Tensor(test_data).to(device), batch_size=model.batch_size, shuffle=True)
+		test_iterator.segments = test_segs
+		test_iterator.action_idx = test_actidx
+		test_iterator.seq_lens = test_lens
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
 	# model.eval()
