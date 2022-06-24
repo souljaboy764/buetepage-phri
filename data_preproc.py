@@ -9,10 +9,38 @@ from human_robot_interaction_data.read_hh_hr_data import read_data, joints_dic
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+def hsmmvae_preproc(trajectories, labels, window_length=40):
+	
+	hsmmvae_inputs = []
+	sequences = []
+	seq_lens = []
+	for i in range(len(trajectories)):
+		trajs_concat = []
+		seq_len, num_joints, dim = trajectories[i].shape
+		# trajectories[i] = trajectories[i].reshape(seq_len,-1)
+		new_len = seq_len + 1 - window_length
+		idx = np.array([np.arange(j,j+window_length) for j in range(new_len)])
+		for traj in [trajectories[i][:,:,:3], trajectories[i][:,:,3:]]:
+			trajs_concat.append(traj.reshape(seq_len, -1)[idx].reshape((new_len, window_length*num_joints*dim//2)))
+		idx_list = np.arange(new_len).reshape(-1, 1)
+		labels_list = labels[i][:new_len].argmax(1).reshape(-1, 1)
+		trajs_concat = np.concatenate(trajs_concat+[idx_list,labels_list],axis=-1)
+		if i == 0:
+			hsmmvae_inputs = trajs_concat
+		else:
+			hsmmvae_inputs = np.vstack([hsmmvae_inputs, trajs_concat])
+		# vae_inputs.append(trajs_concat)
+		# seq_lens.append(seq_len)
+		# sequences.append(np.concatenate([trajs_concat,labels[i][:trajs_concat.shape[0]]],axis=-1))
+		
+	return np.array(hsmmvae_inputs)
+
+
 def vae_tdm_preproc(trajectories, labels, window_length=40):
 	
 	vae_inputs = []
 	sequences = []
+	seq_lens = []
 	for i in range(len(trajectories)):
 		trajs_concat = []
 		seq_len, num_joints, dim = trajectories[i].shape
@@ -24,14 +52,19 @@ def vae_tdm_preproc(trajectories, labels, window_length=40):
 
 			idx = np.array([np.arange(i,i+window_length) for i in range(seq_len + 1 - window_length)])
 			trajs_concat.append(traj[idx].reshape((seq_len + 1 - window_length, window_length*num_joints*dim//2)))
+			print(trajs_concat[-1].shape)
 		trajs_concat = np.concatenate(trajs_concat,axis=-1)
-		if i == 0:
-			vae_inputs = trajs_concat
-		else:
-			vae_inputs = np.vstack([vae_inputs, trajs_concat])
+		print(trajs_concat.shape)
+		print('\n')
+		# if i == 0:
+		# 	vae_inputs = trajs_concat
+		# else:
+		# 	vae_inputs = np.vstack([vae_inputs, trajs_concat])
+		vae_inputs.append(trajs_concat)
+		seq_lens.append(seq_len)
 		sequences.append(np.concatenate([trajs_concat,labels[i][:trajs_concat.shape[0]]],axis=-1))
-
-	return np.array(vae_inputs), np.array(sequences)
+		
+	return np.array(vae_inputs), np.array(seq_lens), np.array(sequences)
 
 def vrnn_preproc_downsamples(trajectories, labels, window_length=40):
 	vae_inputs = []
@@ -51,8 +84,8 @@ def preproc(src_dir, downsample_len=250, augment=False):
 	test_data = []
 	test_labels = []
 	
-	# idx_list = np.array([joints_dic[joint] for joint in ['RightShoulder', 'RightArm', 'RightForeArm', 'RightHand']])
-	idx_list = np.array([joints_dic[joint] for joint in ['RightHand']])
+	idx_list = np.array([joints_dic[joint] for joint in ['RightShoulder', 'RightArm', 'RightForeArm', 'RightHand']])
+	# idx_list = np.array([joints_dic[joint] for joint in ['RightHand']])
 	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(len(idx_list),1,1)
 	action_onehot = np.eye(5)
 	actions = ['hand_wave', 'hand_shake', 'rocket', 'parachute']
@@ -95,7 +128,7 @@ def preproc(src_dir, downsample_len=250, augment=False):
 				labels = np.zeros((traj.shape[0],5))
 				labels[:] = action_onehot[a]
 				
-				# # the indices where no movement occurs at the end are annotated as "not active". (Sec. 4.3.1 of the paper)
+				# the indices where no movement occurs at the end are annotated as "not active". (Sec. 4.3.1 of the paper)
 				# notactive_idx = np.where(np.sqrt(np.power(np.diff(traj, axis=0),2).sum((2))).mean(1) > 1e-3)[0]
 				# labels[notactive_idx[-1]:] = action_onehot[-1]
 				
@@ -138,7 +171,7 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Data preprocessing for Right arm trajectories of Buetepage et al. (2020).')
 	parser.add_argument('--src-dir', type=str, default='./human_robot_interaction_data', metavar='SRC',
 						help='Path where https://github.com/souljaboy764/human_robot_interaction_data is extracted to read csv files (default: ./human_robot_interaction_data).')
-	parser.add_argument('--dst-dir', type=str, default='./data/orig_bothactors_downsampled200/', metavar='DST',
+	parser.add_argument('--dst-dir', type=str, default='./data/ae_bip/', metavar='DST',
 						help='Path to save the processed trajectories to (default: ./data).')
 	parser.add_argument('--downsample-len', type=int, default=0, metavar='NEW_LEN',
 						help='Length to downsample trajectories to. If 0, no downsampling is performed (default: 0).')
@@ -152,25 +185,28 @@ if __name__=='__main__':
 		if not os.path.exists(args.dst_dir):
 			os.mkdir(args.dst_dir)
 
-		if args.downsample_len == 0:
-			np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences.npz'), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
-			# vae_train_data, tdm_train_data = vae_tdm_preproc(train_data, train_labels)
-			# vae_test_data, tdm_test_data = vae_tdm_preproc(test_data, test_labels)
-			# print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
-			# print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
-			# np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=vae_train_data, test_data=vae_test_data)
-			# np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
-		else:
-			print('Data Data: Training',train_data.shape, 'Testing', test_data.shape)
-			if args.augment:
-					filename = 'labelled_sequences_augmented.npz'
-			else:
-					filename = 'labelled_sequences_'+str(args.downsample_len)+'.npz'
-			np.savez_compressed(os.path.join(args.dst_dir, filename), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
-			# vae_train_data, tdm_train_data = vae_tdm_preproc(train_data, train_labels)
-			# vae_test_data, tdm_test_data = vae_tdm_preproc(test_data, test_labels)
-			# print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
-			# print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
-			# np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=vae_train_data, test_data=vae_test_data)
-			# np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
+		# if args.downsample_len == 0:
+		# 	np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences.npz'), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
+		# 	vae_train_data, seq_lens_train, tdm_train_data = vae_tdm_preproc(train_data, train_labels)
+		# 	vae_test_data, seq_lens_test, tdm_test_data = vae_tdm_preproc(test_data, test_labels)
+		# 	# print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
+		# 	# print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
+		# 	np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=(vae_train_data, seq_lens_train), test_data=(vae_test_data, seq_lens_test))
+		# 	np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
+		# else:
+		# 	print('Data Data: Training',train_data.shape, 'Testing', test_data.shape)
+		# 	if args.augment:
+		# 			filename = 'labelled_sequences_augmented.npz'
+		# 	else:
+		# 			filename = 'labelled_sequences_'+str(args.downsample_len)+'.npz'
+		# 	np.savez_compressed(os.path.join(args.dst_dir, filename), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
+		# 	vae_train_data, seq_lens_train, tdm_train_data = vae_tdm_preproc(train_data, train_labels)
+		# 	vae_test_data, seq_lens_test, tdm_test_data = vae_tdm_preproc(test_data, test_labels)
+		# 	# print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
+		# 	# print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
+		# 	np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=(vae_train_data, seq_lens_train), test_data=(vae_test_data, seq_lens_test))
+		# 	np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
 
+		hsmmvae_train_data = hsmmvae_preproc(train_data, train_labels)
+		hsmmvae_test_data = hsmmvae_preproc(test_data, test_labels)
+		np.savez_compressed(os.path.join(args.dst_dir,'hsmmvae_data.npz'), train_data=hsmmvae_train_data, test_data=hsmmvae_test_data)
