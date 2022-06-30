@@ -1,6 +1,4 @@
-import torch
 from torch import nn
-from torch.nn import functional as F
 
 class AE(nn.Module):
 	def __init__(self, **kwargs):
@@ -32,7 +30,4 @@ class AE(nn.Module):
 		enc = self._encoder(x)
 		z_samples = self.latent(enc)
 		x_gen = self._output(self._decoder(z_samples))
-		return x_gen, z_samples, None
-	
-	def latent_loss(self, zpost_samples, zpost_dist):
-		return 0
+		return x_gen, z_samples, z_samples, None, None, None # to match with VAE output

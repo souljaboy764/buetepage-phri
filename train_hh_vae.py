@@ -11,12 +11,11 @@ from config import global_config, human_vae_config
 
 import matplotlib.pyplot as plt
 from matplotlib.cm import get_cmap
-import pbdlib
 
 colors_10 = get_cmap('tab10')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def run_iters_vae(iterator, lens, model, optimizer):
+def run_iters_vae(iterator, model, optimizer):
 	iters = 0
 	total_recon = []
 	total_kl = []
@@ -25,11 +24,11 @@ def run_iters_vae(iterator, lens, model, optimizer):
 		if model.training:
 			optimizer.zero_grad()
 		x = x.to(device)
-		x_gen, zpost_samples, zpost_dist = model(x)
+		x_gen, zpost_samples, z_mean, z_logstd, z_std, kl_div = model(x)
+		kl_div = kl_div.sum()
 
-		recon_loss = F.mse_loss(x, x_gen, reduction='sum')
-		kl_div = model.latent_loss(zpost_samples, zpost_dist)
-		loss = recon_loss/model.beta + kl_div
+		recon_loss = F.mse_loss(x, x_gen)
+		loss = recon_loss + model.beta*kl_div
 
 		total_recon.append(recon_loss)
 		total_kl.append(kl_div) 
@@ -40,12 +39,12 @@ def run_iters_vae(iterator, lens, model, optimizer):
 			optimizer.step()
 		iters += 1
 
-	return total_recon, total_kl, total_loss, x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims), zpost_samples, x.reshape(-1, model.window_size, model.num_joints, model.joint_dims), iters
+	return torch.mean(torch.Tensor(total_recon)), torch.mean(torch.Tensor(total_kl)), torch.mean(torch.Tensor(total_loss)), x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims), zpost_samples, x.reshape(-1, model.window_size, model.num_joints, model.joint_dims), iters
 
 def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_done, prefix):
-	writer.add_histogram(prefix+'/loss', sum(loss), steps_done)
-	writer.add_scalar(prefix+'/kl_div', sum(kl), steps_done)
-	writer.add_scalar(prefix+'/recon_loss', sum(recon), steps_done)
+	writer.add_histogram(prefix+'/loss', loss, steps_done)
+	writer.add_scalar(prefix+'/kl_div', kl, steps_done)
+	writer.add_scalar(prefix+'/recon_loss', recon, steps_done)
 	
 	# writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
 	batch_size, window_size, num_joints, joint_dims = x_gen.shape
@@ -75,14 +74,14 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 				color_counter += 1
 
 	fig.canvas.draw()
-	writer.add_figure('sample reconstruction', fig, steps_done)
+	writer.add_figure(prefix+'/reconstruction', fig, steps_done)
 	plt.close(fig)
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
-	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
-						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
-	parser.add_argument('--src', type=str, default='./data/ae_bip_downsampled/vae_data.npz', metavar='RES',
+	parser.add_argument('--results', type=str, default='./logs/debug/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
+						help='Path for saving results (default: ./logs/debug/MMDDHHmm).')
+	parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
 						help='Path to read training and testin data (default: ./data/orig/vae/data.npz).')
 	parser.add_argument('--model', type=str, default='VAE', metavar='ARCH', choices=['AE', 'VAE', 'WAE'],
 						help='Which model to use (AE, VAE  or WAE) (default: VAE).')
@@ -127,16 +126,16 @@ if __name__=='__main__':
 		train_data = np.array(data['train_data'])
 		train_data = train_data.astype(np.float32)
 		
-		test_data, test_lens = np.array(data['test_data'])
+		test_data = np.array(data['test_data'])
 		test_data = test_data.astype(np.float32)
 		
-		num_samples, dim = train_data.shape
-		train_p1 = train_data[:, :dim//2]
-		train_p2 = train_data[:, dim//2:]
-		test_p1 = test_data[:, :dim//2]
-		test_p2 = test_data[:, dim//2:]
-		train_data = np.vstack([train_p1, train_p2])
-		test_data = np.vstack([test_p1, test_p2])
+		# num_samples, dim = train_data.shape
+		# train_p1 = train_data[:, :dim//2]
+		# train_p2 = train_data[:, dim//2:]
+		# test_p1 = test_data[:, :dim//2]
+		# test_p2 = test_data[:, dim//2:]
+		# train_data = np.vstack([train_p1, train_p2])
+		# test_data = np.vstack([test_p1, test_p2])
 		train_iterator = DataLoader(torch.Tensor(train_data).to(device), batch_size=model.batch_size, shuffle=True)
 		test_iterator = DataLoader(torch.Tensor(test_data).to(device), batch_size=model.batch_size, shuffle=True)
 	print("Building Writer")
@@ -181,7 +180,9 @@ if __name__=='__main__':
 			checkpoint_file = os.path.join(MODELS_FOLDER, '%0.4d.pth'%(epoch))
 			torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, checkpoint_file)
 
-		print(epoch,'epochs done')
+		print('epochs done:',epoch)
+		print('Training Loss:\t%.3e\tTraining Recon:\t%.3e\tTraining KL:\t%.3e'%(train_loss.detach().cpu().numpy(), train_recon.detach().cpu().numpy(), train_kl.detach().cpu().numpy()))
+		print('Testing Loss:\t%.3e\tTesting Recon:\t%.3e\tTesting KL:\t%.3e'%(test_loss.detach().cpu().numpy(), test_recon.detach().cpu().numpy(), test_kl.detach().cpu().numpy()))
 
 	writer.flush()
 
