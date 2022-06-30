@@ -62,36 +62,64 @@ class VAE(AE):
 		super(VAE, self).__init__(**kwargs)
 		
 		self.post_mean = nn.Linear(self.enc_sizes[-1], self.latent_dim)
-		# Not mentioned in the paper what is used to ensure stddev>0, using softplus for now
-		# self.post_std = nn.Sequential(nn.Linear(self.enc_sizes[-1], self.latent_dim), nn.Softplus())
+		# Not mentioned in the paper what is used to ensure stddev>0, using logstd for now
+		self.post_logstd = nn.Linear(self.enc_sizes[-1], self.latent_dim)
+		
+	def forward(self, x, encode_only = False):
+		enc = self._encoder(x)
+		z_mean = self.post_mean(enc)
+		if encode_only:
+			return z_mean
+
+		z_logstd = self.post_logstd(enc)
+		z_std = z_logstd.exp()
+			
+		kld = 0.5*(z_std**2 + z_mean**2 - 1 - 2*z_logstd).sum(-1)
+		if self.training:
+			z_mean_sampler = z_mean[None]
+			z_std_sampler = z_std[None]
+			zpost_samples = torch.concat([z_mean_sampler + z_std_sampler*torch.randn((10,)+z_std_sampler.shape), z_mean_sampler], dim=0)
+		else:
+			zpost_samples = z_mean
+		
+		x_gen = self._output(self._decoder(zpost_samples))
+		return x_gen, zpost_samples, z_mean, z_logstd, z_std, kld
+
+class FullCovVAE(VAE):
+	def __init__(self, **kwargs):
+		super(VAE, self).__init__(**kwargs)
+		
+		self.post_mean = nn.Linear(self.enc_sizes[-1], self.latent_dim)
 		self.post_cholesky = nn.Linear(self.enc_sizes[-1], (self.latent_dim*(self.latent_dim+1))//2)
 		self.z_prior = Normal(self.z_prior_mean, self.z_prior_std)
 		self.diag_idx = torch.arange(self.latent_dim)
 		self.tril_indices = torch.tril_indices(row=self.latent_dim, col=self.latent_dim, offset=0)
 
-	def forward(self, x, encode_only = False):
+	def forward(self, x, encode_only = False, prior = None):
 		enc = self._encoder(x)
-		# zpost_dist = Normal(self.post_mean(enc), self.post_std(enc))
+		z_mean = self.post_mean(enc)
 		
+		if encode_only:
+			return z_mean
 		# Colesky Matrix Prediction 
 		# Dorta et al. "Structured Uncertainty Prediction Networks" CVPR'18
 		# Dorta et al. "Training VAEs Under Structured Residuals" 2018
-		z_mean = self.post_mean(enc)
 		z_std = self.post_cholesky(enc)
 		z_chol = torch.zeros(z_std.shape[:-1]+(self.latent_dim, self.latent_dim)).to(z_std.device)
 		z_chol[..., self.tril_indices[0], self.tril_indices[1]] = z_std
 		z_chol[..., self.diag_idx,self.diag_idx] = 2*torch.abs(z_chol[..., self.diag_idx,self.diag_idx]) + 1e-2
-		zpost_dist = MultivariateNormal(z_mean, scale_tril=z_chol)
-			
-		if encode_only:
-			return zpost_dist
+
+		# if prior is None:			
+		# 	kld = 
 		if self.training:
-			zpost_samples = torch.concat([zpost_dist.rsample((10,)), z_mean[None]], dim=0)
+			z_mean_sampler = z_mean[None]
+			z_std_sampler = z_std[None]
+			zpost_samples = torch.concat([z_mean_sampler + z_std_sampler*torch.randn((10,)+z_std_sampler.shape), z_mean_sampler], dim=0)
 		else:
 			zpost_samples = z_mean
 		
 		x_gen = self._output(self._decoder(zpost_samples))
-		return x_gen, zpost_samples, zpost_dist
+		return x_gen, zpost_samples, (z_mean, z_chol, z_std)
 
 	def latent_loss(self, zpost_samples, zpost_dist):
 		if isinstance(self.z_prior, Normal):

@@ -84,12 +84,8 @@ if __name__=='__main__':
 						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
 	parser.add_argument('--src', type=str, default='./data/ae_bip_downsampled/vae_data.npz', metavar='RES',
 						help='Path to read training and testin data (default: ./data/orig/vae/data.npz).')
-	parser.add_argument('--prior', type=str, default='HSMM', metavar='P(Z)', choices=['None', 'RNN', 'BIP', 'HSMM'],
-						help='Which prior to use for the VAE (default: None')	
-	parser.add_argument('--hsmm-components', type=int, default=6, metavar='N_COMPONENTS', 
-						help='Number of components to use in HSMM Prior (default: 6).')						
 	parser.add_argument('--model', type=str, default='VAE', metavar='ARCH', choices=['AE', 'VAE', 'WAE'],
-						help='Path to read training and testin data (default: ./data/data/single_sample_per_action/data.npz).')					
+						help='Which model to use (AE, VAE  or WAE) (default: VAE).')
 	args = parser.parse_args()
 	torch.manual_seed(128542)
 	torch.autograd.set_detect_anomaly(True)
@@ -109,11 +105,11 @@ if __name__=='__main__':
 		os.makedirs(SUMMARIES_FOLDER)
 		np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, vae_config=vae_config)
 
-	elif os.path.exists(os.path.join(MODELS_FOLDER,'hyperparams.npz')):
-		hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
-		args = hyperparams['args'].item() # overwrite args if loading from checkpoint
-		config = hyperparams['global_config'].item()
-		vae_config = hyperparams['vae_config'].item()
+	# elif os.path.exists(os.path.join(MODELS_FOLDER,'hyperparams.npz')):
+	# 	hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
+	# 	args = hyperparams['args'].item() # overwrite args if loading from checkpoint
+	# 	config = hyperparams['global_config'].item()
+	# 	vae_config = hyperparams['vae_config'].item()
 
 	print("Creating Model and Optimizer")
 	model = getattr(networks, args.model)(**(vae_config.__dict__)).to(device)
@@ -128,35 +124,21 @@ if __name__=='__main__':
 
 	print("Reading Data")
 	with np.load(args.src, allow_pickle=True) as data:
-		train_data, train_lens = np.array(data['train_data'])
+		train_data = np.array(data['train_data'])
 		train_data = train_data.astype(np.float32)
-		train_lens = train_lens.astype(np.int32)
-		train_segs = np.cumsum(train_lens)
-		train_actidx = np.array([[0,24],[24,54],[54,110],[110,149]])
-
+		
 		test_data, test_lens = np.array(data['test_data'])
 		test_data = test_data.astype(np.float32)
-		test_lens = test_lens.astype(np.int32)
-		test_segs = np.cumsum(test_lens)
-		test_actidx = np.array([[0,7],[7,15],[15,29],[29,39]])
 		
-		# train_data = np.array(data['train_data']).astype(np.float32)
-		# test_data = np.array(data['test_data']).astype(np.float32)
 		num_samples, dim = train_data.shape
-		# train_p1 = train_data[:, :dim//2]
-		# train_p2 = train_data[:, dim//2:]
-		# test_p1 = test_data[:, :dim//2]
-		# test_p2 = test_data[:, dim//2:]
-		# train_data = np.vstack([train_p1, train_p2])
-		# test_data = np.vstack([test_p1, test_p2])
+		train_p1 = train_data[:, :dim//2]
+		train_p2 = train_data[:, dim//2:]
+		test_p1 = test_data[:, :dim//2]
+		test_p2 = test_data[:, dim//2:]
+		train_data = np.vstack([train_p1, train_p2])
+		test_data = np.vstack([test_p1, test_p2])
 		train_iterator = DataLoader(torch.Tensor(train_data).to(device), batch_size=model.batch_size, shuffle=True)
-		train_iterator.segments = train_segs
-		train_iterator.action_idx = train_actidx
-		train_iterator.seq_lens = train_lens
 		test_iterator = DataLoader(torch.Tensor(test_data).to(device), batch_size=model.batch_size, shuffle=True)
-		test_iterator.segments = test_segs
-		test_iterator.action_idx = test_actidx
-		test_iterator.seq_lens = test_lens
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
 	# model.eval()
