@@ -27,7 +27,8 @@ def run_iters_vae(iterator, model, optimizer):
 		x_gen, zpost_samples, z_mean, z_logstd, z_std, kl_div = model(x)
 		kl_div = kl_div.sum()
 
-		recon_loss = F.mse_loss(x, x_gen)
+		recon_loss = F.mse_loss(x, x_gen, reduction='mean')
+		kl_div = model.latent_loss(zpost_samples, zpost_dist)
 		loss = recon_loss + model.beta*kl_div
 
 		total_recon.append(recon_loss)
@@ -78,13 +79,13 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 	plt.close(fig)
 
 if __name__=='__main__':
-	parser = argparse.ArgumentParser(description='SKID Training')
-	parser.add_argument('--results', type=str, default='./logs/debug/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
-						help='Path for saving results (default: ./logs/debug/MMDDHHmm).')
+	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
+	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
+						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
 	parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
-						help='Path to read training and testin data (default: ./data/orig/vae/data.npz).')
-	parser.add_argument('--model', type=str, default='VAE', metavar='ARCH', choices=['AE', 'VAE', 'WAE'],
-						help='Which model to use (AE, VAE  or WAE) (default: VAE).')
+						help='Path to read training and testing data (default: ./data/orig/vae/data.npz).')
+	parser.add_argument('--model', type=str, default='VAE', metavar='AE', choices=['AE', 'VAE'],
+						help='Which model to use (AE or VAE) (default: VAE).')					
 	args = parser.parse_args()
 	torch.manual_seed(128542)
 	torch.autograd.set_detect_anomaly(True)

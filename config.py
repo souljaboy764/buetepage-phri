@@ -4,10 +4,17 @@ class global_config:
 		self.JOINTS_DIM = 3
 		self.WINDOW_LEN = 40
 		self.ROBOT_JOINTS = 7
+<<<<<<< HEAD
 		self.NUM_ACTIONS = 4
 		self.optimizer = 'Adagrad'
 		self.lr = 1e-3
 		self.EPOCHS = 3000
+=======
+		self.NUM_ACTIONS = 5
+		self.optimizer = 'AdamW'
+		self.lr = 0.0001
+		self.EPOCHS = 2000
+>>>>>>> original_bp_fixes
 		self.EPOCHS_TO_SAVE = 100
 
 class human_vae_config:
@@ -19,7 +26,7 @@ class human_vae_config:
 		self.window_size = config.WINDOW_LEN
 		self.hidden_sizes = [250, 150]
 		self.latent_dim = 40
-		self.beta = 0.5
+		self.beta = 0.001
 		self.activation = 'ReLU'
 		self.z_prior_mean = 0
 		self.z_prior_std = 1
