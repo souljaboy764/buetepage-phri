@@ -1,5 +1,7 @@
 import torch
 from torch import nn
+from torch.nn import functional as F
+from torch.distributions import Normal, kl_divergence
 
 from networks import AE
 
@@ -16,17 +18,10 @@ class VAE(AE):
 		enc = self._encoder(x)
 		zpost_dist = Normal(self.latent_mean(enc), self.latent_std(enc))
 		if encode_only:
-			return z_mean
-
-		z_logstd = self.post_logstd(enc)
-		z_std = z_logstd.exp()
-			
-		kld = 0.5*(z_std**2 + z_mean**2 - 1 - 2*z_logstd).sum(-1)
-		if self.training:
-			# Not mentioned how many samples used in paper so using one
-			zpost_samples = z_mean + z_std*torch.randn_like(z_std)			
-		else: 
-			zpost_samples = z_mean
-		
+			return zpost_dist
+		zpost_samples = zpost_dist.rsample()
 		x_gen = self._output(self._decoder(zpost_samples))
-		return x_gen, zpost_samples, z_mean, z_logstd, z_std, kld
+		return x_gen, zpost_samples, zpost_dist
+
+	def latent_loss(self, zpost_samples, zpost_dist):
+		return kl_divergence(zpost_dist, self.z_prior).mean()

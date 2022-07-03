@@ -12,7 +12,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def vae_tdm_preproc(trajectories, labels, window_length=40, robot=False):
 	vae_inputs = []
 	sequences = []
-	seq_lens = []
 	for i in range(len(trajectories)):
 		trajs_concat = []
 		if robot:
@@ -35,17 +34,11 @@ def vae_tdm_preproc(trajectories, labels, window_length=40, robot=False):
 				trajs_concat.append(traj[idx].reshape((traj_shape[0] + 1 - window_length, window_length*4*3)))
 		print('')
 		trajs_concat = np.concatenate(trajs_concat,axis=-1)
-		print(trajs_concat.shape)
-		print('\n')
-		# if i == 0:
-		# 	vae_inputs = trajs_concat
-		# else:
-		# 	vae_inputs = np.vstack([vae_inputs, trajs_concat])
-		vae_inputs.append(trajs_concat)
-		seq_lens.append(seq_len)
+		if i == 0:
+			vae_inputs = trajs_concat
+		else:
+			vae_inputs = np.vstack([vae_inputs, trajs_concat])
 		sequences.append(np.concatenate([trajs_concat,labels[i][:trajs_concat.shape[0]]],axis=-1))
-		
-	return np.array(vae_inputs), np.array(seq_lens), np.array(sequences)
 
 	return np.array(vae_inputs), np.array(sequences)
 
@@ -57,11 +50,6 @@ def preproc(src_dir, downsample_len=250, robot=False):
 	test_data = []
 	test_labels = []
 	
-	idx_list = np.array([joints_dic[joint] for joint in ['Hips', 'Spine1', 'Neck', 'Head', 
-														'LeftShoulder', 'LeftArm', 'LeftForeArm', 'LeftHand',
-														'RightShoulder', 'RightArm', 'RightForeArm', 'RightHand']])
-	# idx_list = np.array([joints_dic[joint] for joint in ['RightHand']])
-	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(len(idx_list),1,1)
 	action_onehot = np.eye(5)
 	actions = ['hand_wave', 'hand_shake', 'rocket', 'parachute']
 	
@@ -149,18 +137,18 @@ def preproc(src_dir, downsample_len=250, robot=False):
 	print('Sequences: Training',train_data.shape, 'Testing', test_data.shape)
 	print('Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
 	
-	if augment: # Augment only if downsampling the trajectories
+	if downsample_len > 0: # Augment only if downsampling the trajectories
 		M = np.eye(downsample_len)*2
 		for i in range(1,downsample_len):
 			M[i][i-1] = M[i-1][i] = -1
 
-		B = torch.Tensor(np.linalg.pinv(M) * 5e-5).to(device)
+		B = torch.Tensor(np.linalg.pinv(M) * 1e-6).to(device)
 		L = torch.linalg.cholesky(B) # faster/momry-friendly to directly give cholesky
 		num_trajs = len(train_data)
-		n_augments = 70
+		n_augments = 30
 		for i in range(num_trajs):
-			augments = torch.distributions.MultivariateNormal(torch.Tensor(train_data[i]).to(device).reshape(len(idx_list)*6, downsample_len), scale_tril=L).sample((n_augments,)).cpu().numpy()
-			train_data = np.concatenate([train_data,augments.reshape(n_augments, downsample_len, len(idx_list), 6)], 0)
+			augments = torch.distributions.MultivariateNormal(torch.Tensor(train_data[i]).to(device).reshape(24, downsample_len), scale_tril=L).sample((n_augments,)).cpu().numpy()
+			train_data = np.concatenate([train_data,augments.reshape(n_augments, downsample_len, 4, 6)], 0)
 			train_labels = np.concatenate([train_labels,np.repeat(train_labels[i:i+1], augments.shape[0], axis=0)], 0)
 		print('Augmented Sequences: Training',train_data.shape, 'Testing', test_data.shape)
 		print('Augmented Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
@@ -170,7 +158,7 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Data preprocessing for Right arm trajectories of Buetepage et al. (2020).')
 	parser.add_argument('--src-dir', type=str, default='./human_robot_interaction_data', metavar='SRC',
 						help='Path where https://github.com/souljaboy764/human_robot_interaction_data is extracted to read csv files (default: ./human_robot_interaction_data).')
-	parser.add_argument('--dst-dir', type=str, default='./data/ae_bip/', metavar='DST',
+	parser.add_argument('--dst-dir', type=str, default='./data/orig_bothactors_downsamples/', metavar='DST',
 						help='Path to save the processed trajectories to (default: ./data).')
 	parser.add_argument('--downsample-len', type=int, default=0, metavar='NEW_LEN',
 						help='Length to downsample trajectories to. If 0, no downsampling is performed (default: 0).')

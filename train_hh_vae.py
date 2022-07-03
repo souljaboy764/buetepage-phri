@@ -24,15 +24,14 @@ def run_iters_vae(iterator, model, optimizer):
 		if model.training:
 			optimizer.zero_grad()
 		x = x.to(device)
-		x_gen, zpost_samples, z_mean, z_logstd, z_std, kl_div = model(x)
-		kl_div = kl_div.sum()
+		x_gen, zpost_samples, zpost_dist = model(x)
 
 		recon_loss = F.mse_loss(x, x_gen, reduction='mean')
 		kl_div = model.latent_loss(zpost_samples, zpost_dist)
 		loss = recon_loss + model.beta*kl_div
 
 		total_recon.append(recon_loss)
-		total_kl.append(kl_div) 
+		total_kl.append(kl_div)
 		total_loss.append(loss)
 
 		if model.training:
@@ -40,14 +39,14 @@ def run_iters_vae(iterator, model, optimizer):
 			optimizer.step()
 		iters += 1
 
-	return torch.mean(torch.Tensor(total_recon)), torch.mean(torch.Tensor(total_kl)), torch.mean(torch.Tensor(total_loss)), x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims), zpost_samples, x.reshape(-1, model.window_size, model.num_joints, model.joint_dims), iters
+	return total_recon, total_kl, total_loss, x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims), zpost_samples, x.reshape(-1, model.window_size, model.num_joints, model.joint_dims), iters
 
 def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_done, prefix):
-	writer.add_histogram(prefix+'/loss', loss, steps_done)
-	writer.add_scalar(prefix+'/kl_div', kl, steps_done)
-	writer.add_scalar(prefix+'/recon_loss', recon, steps_done)
+	writer.add_histogram(prefix+'/loss', sum(loss), steps_done)
+	writer.add_scalar(prefix+'/kl_div', sum(kl), steps_done)
+	writer.add_scalar(prefix+'/recon_loss', sum(recon), steps_done)
 	
-	# writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
+	writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
 	batch_size, window_size, num_joints, joint_dims = x_gen.shape
 	x_gen = x_gen[:5]
 	x = x[:5]
@@ -75,7 +74,7 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 				color_counter += 1
 
 	fig.canvas.draw()
-	writer.add_figure(prefix+'/reconstruction', fig, steps_done)
+	writer.add_figure('sample reconstruction', fig, steps_done)
 	plt.close(fig)
 
 if __name__=='__main__':
@@ -105,11 +104,11 @@ if __name__=='__main__':
 		os.makedirs(SUMMARIES_FOLDER)
 		np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, vae_config=vae_config)
 
-	# elif os.path.exists(os.path.join(MODELS_FOLDER,'hyperparams.npz')):
-	# 	hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
-	# 	args = hyperparams['args'].item() # overwrite args if loading from checkpoint
-	# 	config = hyperparams['global_config'].item()
-	# 	vae_config = hyperparams['vae_config'].item()
+	elif os.path.exists(os.path.join(MODELS_FOLDER,'hyperparams.npz')):
+		hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
+		args = hyperparams['args'].item() # overwrite args if loading from checkpoint
+		config = hyperparams['global_config'].item()
+		vae_config = hyperparams['vae_config'].item()
 
 	print("Creating Model and Optimizer")
 	model = getattr(networks, args.model)(**(vae_config.__dict__)).to(device)
@@ -124,21 +123,18 @@ if __name__=='__main__':
 
 	print("Reading Data")
 	with np.load(args.src, allow_pickle=True) as data:
-		train_data = np.array(data['train_data'])
-		train_data = train_data.astype(np.float32)
-		
-		test_data = np.array(data['test_data'])
-		test_data = test_data.astype(np.float32)
-		
-		# num_samples, dim = train_data.shape
-		# train_p1 = train_data[:, :dim//2]
-		# train_p2 = train_data[:, dim//2:]
-		# test_p1 = test_data[:, :dim//2]
-		# test_p2 = test_data[:, dim//2:]
-		# train_data = np.vstack([train_p1, train_p2])
-		# test_data = np.vstack([test_p1, test_p2])
-		train_iterator = DataLoader(torch.Tensor(train_data).to(device), batch_size=model.batch_size, shuffle=True)
-		test_iterator = DataLoader(torch.Tensor(test_data).to(device), batch_size=model.batch_size, shuffle=True)
+		train_data = np.array(data['train_data']).astype(np.float32)
+		test_data = np.array(data['test_data']).astype(np.float32)
+		num_samples, dim = train_data.shape
+		train_p1 = train_data[:, :dim//2]
+		train_p2 = train_data[:, dim//2:]
+		test_p1 = test_data[:, :dim//2]
+		test_p2 = test_data[:, dim//2:]
+		train_data = np.vstack([train_p1, train_p2])
+		test_data = np.vstack([test_p1, test_p2])
+		train_iterator = DataLoader(train_data, batch_size=model.batch_size, shuffle=True)
+		test_iterator = DataLoader(test_data, batch_size=model.batch_size, shuffle=True)
+
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
 	# model.eval()
@@ -181,9 +177,7 @@ if __name__=='__main__':
 			checkpoint_file = os.path.join(MODELS_FOLDER, '%0.4d.pth'%(epoch))
 			torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, checkpoint_file)
 
-		print('epochs done:',epoch)
-		print('Training Loss:\t%.3e\tTraining Recon:\t%.3e\tTraining KL:\t%.3e'%(train_loss.detach().cpu().numpy(), train_recon.detach().cpu().numpy(), train_kl.detach().cpu().numpy()))
-		print('Testing Loss:\t%.3e\tTesting Recon:\t%.3e\tTesting KL:\t%.3e'%(test_loss.detach().cpu().numpy(), test_recon.detach().cpu().numpy(), test_kl.detach().cpu().numpy()))
+		print(epoch,'epochs done')
 
 	writer.flush()
 
