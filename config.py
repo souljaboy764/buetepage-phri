@@ -33,7 +33,10 @@ class robot_vae_config:
 		self.window_size = config.WINDOW_LEN
 		self.hidden_sizes = [250, 150]
 		self.latent_dim = 7
+		self.beta = 0.001
 		self.activation = 'ReLU'
+		self.z_prior_mean = 0
+		self.z_prior_std = 1
 
 class human_tdm_config:
 	def __init__(self):
