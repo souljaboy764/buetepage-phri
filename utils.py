@@ -34,3 +34,21 @@ def MMD(x, y, reduction='mean'):
 		return XX + YY - 2. * XY
 	
 	return getattr(torch, reduction)(XX + YY - 2. * XY)
+
+def KLD(p, q, log_targets=False, reduction='sum'):
+	if log_targets:
+		kld = (p.exp()*(p - q))
+	else:
+		kld = (p*(p.log() - q.log()))
+	
+	if reduction is None:
+		return kld
+	return getattr(torch, reduction)(kld)
+
+def JSD(p, q, log_targets=False, reduction='sum'):
+	if log_targets:
+		m = 0.5*(p.exp() + q.exp())
+		return 0.5*(KLD(p.exp(), m, False, reduction) + KLD(q.exp(), m, False, reduction))
+	else:
+		m = 0.5*(p + q)
+		return 0.5*(KLD(p, m, False, reduction) + KLD(q, m, False, reduction))

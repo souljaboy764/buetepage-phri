@@ -9,14 +9,14 @@ class VAE(AE):
 	def __init__(self, **kwargs):
 		super(VAE, self).__init__(**kwargs)
 		
-		self.post_mean = nn.Linear(self.enc_sizes[-1], self.latent_dim)
+		self.latent_mean = nn.Linear(self.enc_sizes[-1], self.latent_dim)
 		# Not mentioned in the paper what is used to ensure stddev>0, using softplus for now
-		self.post_std = nn.Sequential(nn.Linear(self.enc_sizes[-1], self.latent_dim), nn.Softplus())
+		self.latent_std = nn.Sequential(nn.Linear(self.enc_sizes[-1], self.latent_dim), nn.Softplus())
 		self.z_prior = Normal(self.z_prior_mean, self.z_prior_std)
 
 	def forward(self, x, encode_only = False):
 		enc = self._encoder(x)
-		zpost_dist = Normal(self.post_mean(enc), self.post_std(enc))
+		zpost_dist = Normal(self.latent_mean(enc), self.latent_std(enc))
 		if encode_only:
 			return zpost_dist
 		zpost_samples = zpost_dist.rsample()

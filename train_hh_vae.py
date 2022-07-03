@@ -28,7 +28,7 @@ def run_iters_vae(iterator, model, optimizer):
 
 		recon_loss = F.mse_loss(x, x_gen, reduction='mean')
 		kl_div = model.latent_loss(zpost_samples, zpost_dist)
-		loss = recon_loss/model.beta + kl_div
+		loss = recon_loss + model.beta*kl_div
 
 		total_recon.append(recon_loss)
 		total_kl.append(kl_div)

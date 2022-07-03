@@ -10,6 +10,7 @@ import os, datetime, argparse
 
 import networks
 from config import global_config, human_tdm_config
+from utils import *
 
 p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
 p2_tdm_idx = np.concatenate([480+np.arange(12),np.arange(-5,0)])
@@ -41,13 +42,8 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 		kl_loss_2 = torch.distributions.kl_divergence(zd2_dist, zx2_dist)[mask].mean()
 		
 		d1_logprobs = d1_dist.log_prob(d1_samples)[mask]
-		d1_probs = d1_logprobs.exp()
 		d2_logprobs = d2_dist.log_prob(d2_samples)[mask]
-		d2_probs = d2_logprobs.exp()
-		m_log = torch.log(0.5*(d1_probs + d2_probs))
-		# jsd = 0.5*F.kl_div(d1_probs, m, reduction='mean') + 0.5*F.kl_div(d2_probs, m, reduction='mean')
-		jsd = 0.5*d1_probs*(d1_logprobs - m_log) + 0.5*d2_probs*(d2_logprobs - m_log)
-		jsd = jsd.mean()
+		jsd = JSD(d1_logprobs, d2_logprobs, log_targets=True, reduction='sum')
 
 		loss = kl_loss_1 + kl_loss_2 + jsd
 		
@@ -125,7 +121,8 @@ if __name__=='__main__':
 		global_step = ckpt['epoch']
 
 	vae = getattr(networks, vae_args.model)(**(vae_config.__dict__)).to(device)
-	ckpt = torch.load(os.path.join(VAE_MODELS_FOLDER, 'final.pth'))
+	# ckpt = torch.load(os.path.join(VAE_MODELS_FOLDER, 'final.pth'))
+	ckpt = torch.load(args.vae_ckpt)
 	vae.load_state_dict(ckpt['model'])
 	vae.eval()
 
