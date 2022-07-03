@@ -78,13 +78,13 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 	plt.close(fig)
 
 if __name__=='__main__':
-	parser = argparse.ArgumentParser(description='SKID Training')
+	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
 	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
 						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
 	parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
-						help='Path to read training and testin data (default: ./data/orig/vae/data.npz).')
-	parser.add_argument('--model', type=str, default='WAE', metavar='AE', choices=['AE', 'VAE', 'WAE'],
-						help='Path to read training and testin data (default: ./data/data/single_sample_per_action/data.npz).')					
+						help='Path to read training and testing data (default: ./data/orig/vae/data.npz).')
+	parser.add_argument('--model', type=str, default='VAE', metavar='AE', choices=['AE', 'VAE'],
+						help='Which model to use (AE or VAE) (default: VAE).')					
 	args = parser.parse_args()
 	torch.manual_seed(128542)
 	torch.autograd.set_detect_anomaly(True)
