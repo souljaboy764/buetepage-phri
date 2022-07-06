@@ -87,7 +87,7 @@ if __name__=='__main__':
 		batch_size, seq_len, dims = x.shape
 		mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
 		x1_tdm = x[:,:,p1_tdm_idx].to(device)
-		x1_tdm = x[:,:,p1_tdm_idx].to(device)
+		x2_tdm = x[:,:,p2_tdm_idx].to(device)
 		x1_vae = x[:,:,p1_vae_idx].to(device)
 		x2_vae = x[:,:,p2_vae_idx].to(device)
 
@@ -97,12 +97,12 @@ if __name__=='__main__':
 		loss = F.mse_loss(x2_vae, x_gen_i, reduction='none')[mask]
 		print(loss.shape)
 		total_loss.append(loss.detach().cpu().numpy())
-		x_gen.append(x_gen_i.detach().cpu().numpy())
+		x_gen_tdm.append(x_gen_i.detach().cpu().numpy())
 
 	total_loss = np.concatenate(total_loss,axis=0)
 	# x_gen = np.concatenate(x_gen,axis=0)
-	x_gen = np.array(x_gen)
+	x_gen_tdm = np.array(x_gen_tdm)
 	print(total_loss.mean())
-	print(type(x_gen))
+	print(type(x_gen_tdm))
 	print(type(test_data_np))
-	np.savez_compressed('tdm_test.npz', x_gen=x_gen, test_data=test_data_np)
+	np.savez_compressed('tdm_test.npz', x_gen=x_gen_tdm, test_data=test_data_np)
