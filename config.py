@@ -52,3 +52,18 @@ class human_tdm_config:
 		self.decoder_sizes = [40, 40]
 		self.activation = 'Tanh'
 		self.output_dim = human_vae_config().latent_dim
+
+class hri_config:
+	def __init__(self):
+		config = global_config()
+		self.batch_size = 149
+		self.num_joints = config.ROBOT_JOINTS
+		self.joint_dims = 1
+		self.human_dims = 40
+		self.num_actions = config.NUM_ACTIONS
+		self.lstm_hidden = 256
+		self.linear_hidden = 40
+		self.num_lstm_layers = 3
+		self.latent_dim = 7
+		self.activation = 'Tanh'
+		

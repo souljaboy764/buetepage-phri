@@ -14,7 +14,7 @@ from utils import *
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
-	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', default='logs/results/02231424/models/final.pth',
+	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', default='logs/vae_hh_orig_oldcommit_AdamW_07011535/models/final.pth',
 						help='Path to the VAE checkpoint, where the TDM models will also be saved.')
 	parser.add_argument('--src', type=str, default='./data/orig_bothactors/tdm_data.npz', metavar='DATA',
 						help='Path to read training and testin data (default: ./data/orig_bothactors/tdm_data.npz).')
@@ -25,7 +25,7 @@ if __name__=='__main__':
 
 	DEFAULT_RESULTS_FOLDER = os.path.join(os.path.dirname(os.path.dirname(args.vae_ckpt)))
 	VAE_MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
-	MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, 'tdm_jsdsamples', "models")
+	MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, 'tdm', "models")
 	os.makedirs(MODELS_FOLDER,exist_ok=True)
 	SUMMARIES_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "summary")
 	global_step = 0
@@ -67,6 +67,7 @@ if __name__=='__main__':
 		test_data_np = data['test_data']
 		test_data = [torch.Tensor(traj) for traj in test_data_np]
 		test_num = len(test_data)
+		print(test_num,'Testing Trajecotries')
 		lens = []
 		for traj in test_data:
 			lens.append(traj.shape[0])
@@ -80,17 +81,21 @@ if __name__=='__main__':
 
 	print("Starting Evaluation")
 	total_loss = []
-	x_gen = []
+	x_gen_tdm = []
+	x_gen_autoencoding = []
 	for i, (x, lens) in enumerate(test_iterator):
 		batch_size, seq_len, dims = x.shape
 		mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
 		x1_tdm = x[:,:,p1_tdm_idx].to(device)
+		x1_tdm = x[:,:,p1_tdm_idx].to(device)
+		x1_vae = x[:,:,p1_vae_idx].to(device)
 		x2_vae = x[:,:,p2_vae_idx].to(device)
 
 		zd1_dist, d1_samples, d1_dist = tdm(torch.nn.utils.rnn.pack_padded_sequence(x1_tdm, lens, batch_first=True, enforce_sorted=False), seq_len)
 		x_gen_i = vae._output(vae._decoder(zd1_dist.mean))
 		
 		loss = F.mse_loss(x2_vae, x_gen_i, reduction='none')[mask]
+		print(loss.shape)
 		total_loss.append(loss.detach().cpu().numpy())
 		x_gen.append(x_gen_i.detach().cpu().numpy())
 

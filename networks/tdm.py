@@ -40,7 +40,10 @@ class TDM(nn.Module):
 		enc = self.activation(enc)
 
 		d_dist = Normal(self.latent_mean(enc), self.latent_std(enc)+1e-4)
-		d_samples = d_dist.rsample()
+		if self.training:
+			d_samples = d_dist.rsample()
+		else:
+			d_samples = d_dist.mean
 
 		dec = self._decoder(d_samples)
 
