@@ -1,25 +1,15 @@
 import torch
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-from matplotlib.cm import get_cmap
-from matplotlib.animation import FFMpegWriter
 import argparse, os
-from joblib import Parallel, delayed
 
 import networks
-from config import human_vae_config
 
-parser = argparse.ArgumentParser(description='SKID Training')
-parser.add_argument('--ckpt', type=str, required=True, metavar='CKPT',
+parser = argparse.ArgumentParser(description='Buetepage Human VAE Testing')
+parser.add_argument('--ckpt', type=str, default='logs/vae_hh_orig_oldcommit_AdamW_07011535/models/final.pth', metavar='CKPT',
 					help='Checkpoint to test')
-parser.add_argument('--src', type=str, default='./data/single_sample_per_action/vae/data.npz', metavar='RES',
-					help='Path to read training and testin data (default: ./data/data/single_sample_per_action/data.npz).')
+parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
+					help='Path to read training and testin data (default: ./data/orig/vae/data.npz).')
 args = parser.parse_args()
 torch.manual_seed(128542)
 np.random.seed(19680801)
@@ -42,35 +32,10 @@ model.load_state_dict(ckpt['model'])
 
 model.eval()
 x_gen, zpost_samples, zpost_dist = model(test_data)
-x_gen = x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims).cpu().detach().numpy()
-test_data = test_data.reshape(-1, model.window_size, model.num_joints, model.joint_dims).cpu().detach().numpy()
-
-metadata = dict(title='Buetepage VAE Test', artist='Matplotlib',
-                comment='3D visualization of right arm')
-writer = FFMpegWriter(fps=40, metadata=metadata)
-
-fig = plt.figure()
-ax = fig.add_subplot(projection="3d",title='reconstruction')
-ax.set(xlim3d=(-0.5, 0.5), xlabel='X')
-ax.set(ylim3d=(-0.5, 0.5), ylabel='Y')
-ax.set(zlim3d=(-0.5, 0.5), zlabel='Z')
-
-current_point_recon, = ax.plot([], [], [], '-ko',  mfc='blue', mec='k')
-window_points_recon = [ax.plot([], [], [], '--ko', mfc='blue', mec='k', alpha=0.3)[0] for j in range(1, model.window_size, model.window_size//10)]
-
-current_point_gt, = ax.plot([], [], [], '-ko', mfc='green', mec='k')
-
-def set_points_and_edges(edges_plot, points): # points.shape == N, 3
-    edges_plot.set_data(points[:,:2].T)
-    edges_plot.set_3d_properties(points[:,2])
-
-with writer.saving(fig, "writer_test_windows.mp4", 300):
-    for i in range(x_gen.shape[0]):
-        set_points_and_edges(current_point_recon, x_gen[i,0])
-        set_points_and_edges(current_point_gt, test_data[i,0])
-        for j in range(1, model.window_size, model.window_size//10):
-            idx = (j-1)*10//model.window_size
-            set_points_and_edges(window_points_recon[idx], x_gen[i,j])
-        # Parallel(n_jobs=model.window_size//8)(delayed(set_points_and_edges)(window_points_recon, x_gen[i,j]) for j in range(1, model.window_size, model.window_size//8))
-        writer.grab_frame()
-        print(i)
+x_gen = x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims)
+test_data = test_data.reshape(-1, model.window_size, model.num_joints, model.joint_dims)
+error = (test_data - x_gen)**2
+print("Prediction error",error.sum(-1).sum(-1).mean())
+x_gen = x_gen.cpu().detach().numpy()
+test_data = test_data.cpu().detach().numpy()
+np.savez_compressed('vae_test.npz', x_gen=x_gen, test_data=test_data)
