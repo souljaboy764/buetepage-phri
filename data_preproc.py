@@ -42,6 +42,69 @@ def vae_tdm_preproc(trajectories, labels, window_length=40, robot=False):
 
 	return np.array(vae_inputs), np.array(sequences)
 
+
+def preproc_hri(src_dir):
+	train_data = []
+	train_labels = []
+	test_data = []
+	test_labels = []
+	
+	action_onehot = np.eye(5)
+	actions = ['hand_wave', 'hand_shake', 'rocket', 'parachute']
+	
+	for a in range(len(actions)):
+		action = actions[a]
+		trajectories = []
+		traj_labels = []
+
+		idx_list = np.array([joints_dic[joint] for joint in ['RightShoulder', 'RightArm', 'RightForeArm', 'RightHand']])
+		data_h, data_r = read_hri_data(action, os.path.join(src_dir, 'hr'))
+		seq_len, _, dims = data_h.shape
+		data_h = data_h[:, idx_list].reshape((-1, len(idx_list)*dims)) # seq_len, 4*3
+		segments_file_h = os.path.join(src_dir, 'hr', 'segmentation', action+'_p1.npy')
+		segments_file_r = os.path.join(src_dir, 'hr', 'segmentation', action+'_r2.npy')
+		segments_h = np.load(segments_file_h)
+		segments_r = np.load(segments_file_r)
+
+		for i in range(len(segments_h)):
+			s_h = segments_h[i]
+			s_r = segments_r[i]
+			traj1 = data_h[s_h[0]:s_h[1]] # seq_len, 12
+			traj2 = data_r[s_r[0]:s_r[1]] # seq_len, 7
+			traj1 = traj1 - traj1[0,0]
+			labels = np.zeros((traj1.shape[0],5))
+			labels[:] = action_onehot[a]
+			
+			# the indices where no movement occurs at the end are annotated as "not active". (Sec. 4.3.1 of the paper)
+			notactive_idx = np.where(np.sqrt(np.power(np.diff(traj1.reshape((-1, len(idx_list), dims)), axis=0),2).sum((2))).mean(1) > 5e-4)[0]
+			if len(notactive_idx) > 0:
+				labels[:notactive_idx[0]] = action_onehot[-1]
+				labels[notactive_idx[-1]:] = action_onehot[-1]
+
+			traj = np.concatenate([traj1, traj2], axis=-1) # seq_len, 19
+			trajectories.append(traj)
+		
+			
+			traj_labels.append(labels)
+		# train_data += trajectories[:26] # in order to balance the number of samples of each action, data would any be augmented next.
+		# test_data += trajectories[26:31]
+		
+		# the first 80% are for training and the last 20% are for testing (Sec. 4.3.2)
+		split_idx = int(0.8*len(trajectories))
+		train_data += trajectories[:split_idx]
+		test_data += trajectories[split_idx:]
+		train_labels += traj_labels[:split_idx]
+		test_labels += traj_labels[split_idx:]
+	
+	train_data = np.array(train_data)
+	test_data = np.array(test_data)
+	train_labels = np.array(train_labels)
+	test_labels = np.array(test_labels)
+	print('Sequences: Training',train_data.shape, 'Testing', test_data.shape)
+	print('Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
+	
+	return train_data, train_labels, test_data, test_labels
+
 def preproc(src_dir, downsample_len=250, robot=False):
 	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(4,1,1)
 	
