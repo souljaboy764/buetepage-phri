@@ -1,13 +1,10 @@
-import torch
-from torch.nn. functional import grid_sample, affine_grid
-
 import numpy as np
 import os
 import argparse
 
 from human_robot_interaction_data.read_hh_hr_data import *
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from utils import downsample_trajs
 
 def vae_tdm_preproc(trajectories, labels, window_length=40, robot=False):
 	vae_inputs = []
@@ -19,7 +16,6 @@ def vae_tdm_preproc(trajectories, labels, window_length=40, robot=False):
 				traj_shape = traj.shape
 				idx = np.array([np.arange(i,i+window_length) for i in range(traj_shape[0] + 1 - window_length)])
 				trajs_concat.append(traj[idx].reshape((traj_shape[0] + 1 - window_length, window_length*traj_shape[-1])))
-				print(trajs_concat[-1].shape, traj_shape)
 		else:
 			for traj in [trajectories[i][:,:,:3], trajectories[i][:,:,3:]]:
 				traj_shape = traj.shape
@@ -27,12 +23,9 @@ def vae_tdm_preproc(trajectories, labels, window_length=40, robot=False):
 					print('Skipping trajectory not conforming to Dimensions LENx4x3')
 					continue
 				
-				# for i in range(traj_shape[0]- 1 + window_length):
-				# 	sequences.append(traj[i:i+window_length].flatten())
-
 				idx = np.array([np.arange(i,i+window_length) for i in range(traj_shape[0] + 1 - window_length)])
 				trajs_concat.append(traj[idx].reshape((traj_shape[0] + 1 - window_length, window_length*4*3)))
-		print('')
+
 		trajs_concat = np.concatenate(trajs_concat,axis=-1)
 		if i == 0:
 			vae_inputs = trajs_concat
@@ -42,90 +35,16 @@ def vae_tdm_preproc(trajectories, labels, window_length=40, robot=False):
 
 	return np.array(vae_inputs), np.array(sequences)
 
-
-def preproc_hri(src_dir):
-	train_data = []
-	train_labels = []
-	test_data = []
-	test_labels = []
-	
+def preproc(src_dir, robot=False):
+	train_data, train_labels, test_data, test_labels = [], [], [] ,[]
 	action_onehot = np.eye(5)
 	actions = ['hand_wave', 'hand_shake', 'rocket', 'parachute']
 	
 	for a in range(len(actions)):
 		action = actions[a]
-		trajectories = []
-		traj_labels = []
-
+		trajectories, traj_labels = [], []
 		idx_list = np.array([joints_dic[joint] for joint in ['RightShoulder', 'RightArm', 'RightForeArm', 'RightHand']])
-		data_h, data_r = read_hri_data(action, os.path.join(src_dir, 'hr'))
-		seq_len, _, dims = data_h.shape
-		data_h = data_h[:, idx_list].reshape((-1, len(idx_list)*dims)) # seq_len, 4*3
-		segments_file_h = os.path.join(src_dir, 'hr', 'segmentation', action+'_p1.npy')
-		segments_file_r = os.path.join(src_dir, 'hr', 'segmentation', action+'_r2.npy')
-		segments_h = np.load(segments_file_h)
-		segments_r = np.load(segments_file_r)
-
-		for i in range(len(segments_h)):
-			s_h = segments_h[i]
-			s_r = segments_r[i]
-			traj1 = data_h[s_h[0]:s_h[1]] # seq_len, 12
-			traj2 = data_r[s_r[0]:s_r[1]] # seq_len, 7
-			traj1 = traj1 - traj1[0,0]
-			labels = np.zeros((traj1.shape[0],5))
-			labels[:] = action_onehot[a]
-			
-			# the indices where no movement occurs at the end are annotated as "not active". (Sec. 4.3.1 of the paper)
-			notactive_idx = np.where(np.sqrt(np.power(np.diff(traj1.reshape((-1, len(idx_list), dims)), axis=0),2).sum((2))).mean(1) > 5e-4)[0]
-			if len(notactive_idx) > 0:
-				labels[:notactive_idx[0]] = action_onehot[-1]
-				labels[notactive_idx[-1]:] = action_onehot[-1]
-
-			traj = np.concatenate([traj1, traj2], axis=-1) # seq_len, 19
-			trajectories.append(traj)
-		
-			
-			traj_labels.append(labels)
-		# train_data += trajectories[:26] # in order to balance the number of samples of each action, data would any be augmented next.
-		# test_data += trajectories[26:31]
-		
-		# the first 80% are for training and the last 20% are for testing (Sec. 4.3.2)
-		split_idx = int(0.8*len(trajectories))
-		train_data += trajectories[:split_idx]
-		test_data += trajectories[split_idx:]
-		train_labels += traj_labels[:split_idx]
-		test_labels += traj_labels[split_idx:]
-	
-	train_data = np.array(train_data)
-	test_data = np.array(test_data)
-	train_labels = np.array(train_labels)
-	test_labels = np.array(test_labels)
-	print('Sequences: Training',train_data.shape, 'Testing', test_data.shape)
-	print('Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
-	
-	return train_data, train_labels, test_data, test_labels
-
-def preproc(src_dir, downsample_len=250, robot=False):
-	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(4,1,1)
-	
-	train_data = []
-	train_labels = []
-	test_data = []
-	test_labels = []
-	
-	action_onehot = np.eye(5)
-	actions = ['hand_wave', 'hand_shake', 'rocket', 'parachute']
-	
-	for a in range(len(actions)):
-		action = actions[a]
-		trajectories = []
-		traj_labels = []
-
-		idx_list = np.array([joints_dic[joint] for joint in ['RightShoulder', 'RightArm', 'RightForeArm', 'RightHand']])
-		if robot:
-			trials = ['1']
-		else:
-			trials = ['1', '2']
+		trials = ['1'] if robot else ['1', '2']
 		for trial in trials:
 			if robot:
 				data_file_p1 = os.path.join(src_dir, 'hr','p1',action+'_s1_'+trial+'.csv')
@@ -144,11 +63,11 @@ def preproc(src_dir, downsample_len=250, robot=False):
 
 			for s in segments:
 				traj1 = data_p1[s[0]:s[1], idx_list] # seq_len, 4 ,3
+				labels = np.zeros((traj1.shape[0],5))
+				labels[:] = action_onehot[a]
 				if robot:
 					traj2 = data_p2[s[0]:s[1]] # seq_len, 7
 					traj1 = traj1 - traj1[0,0]
-					labels = np.zeros((traj1.shape[0],5))
-					labels[:] = action_onehot[a]
 					
 					# the indices where no movement occurs at the end are annotated as "not active". (Sec. 4.3.1 of the paper)
 					notactive_idx = np.where(np.sqrt(np.power(np.diff(traj1, axis=0),2).sum((2))).mean(1) > 5e-4)[0]
@@ -156,36 +75,19 @@ def preproc(src_dir, downsample_len=250, robot=False):
 						labels[notactive_idx[-1]:] = action_onehot[-1]
 
 					traj = np.concatenate([traj1.reshape(-1, len(idx_list)*3), traj2], axis=-1) # seq_len, 19
-					trajectories.append(traj)
+					
 				else:
 					traj2 = data_p2[s[0]:s[1], idx_list] # seq_len, 4 ,3
 					traj = np.concatenate([traj1, traj2], axis=-1)
 					traj = traj - traj[0,0]
-					# downsample = int((s[1] - s[0])*0.4)
-					if downsample_len > 0:
-						traj = traj.transpose(1,2,0) # 4, 3, seq_len
-						traj = torch.Tensor(traj).to(device).unsqueeze(2) # 4, 3, 1 seq_len
-						traj = torch.concat([traj, torch.zeros_like(traj)], dim=2) # 4, 3, 2 seq_len
-						
-						grid = affine_grid(theta, torch.Size([4, 3, 2, downsample_len]), align_corners=True)
-						traj = grid_sample(traj.type(torch.float32), grid, align_corners=True) # 4, 3, 2 new_length
-						traj = traj[:, :, 0].cpu().detach().numpy() # 4, 3, new_length
-						traj = traj.transpose(2,0,1) # new_length, 4, 3
-						trajectories.append(traj)
-					else:
-						trajectories.append(traj)
-				
-					labels = np.zeros((traj.shape[0],5))
-					labels[:] = action_onehot[a]
-					
+			
 					# the indices where no movement occurs at the end are annotated as "not active". (Sec. 4.3.1 of the paper)
 					notactive_idx = np.where(np.sqrt(np.power(np.diff(traj, axis=0),2).sum((2))).mean(1) > 1e-3)[0]
-					labels[notactive_idx[-1]:] = action_onehot[-1]
-				
+					if len(notactive_idx) > 0:
+						labels[notactive_idx[-1]:] = action_onehot[-1]
+				trajectories.append(traj)
 				traj_labels.append(labels)
-		# train_data += trajectories[:26] # in order to balance the number of samples of each action, data would any be augmented next.
-		# test_data += trajectories[26:31]
-		
+				
 		# the first 80% are for training and the last 20% are for testing (Sec. 4.3.2)
 		split_idx = int(0.8*len(trajectories))
 		train_data += trajectories[:split_idx]
@@ -200,21 +102,6 @@ def preproc(src_dir, downsample_len=250, robot=False):
 	print('Sequences: Training',train_data.shape, 'Testing', test_data.shape)
 	print('Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
 	
-	if downsample_len > 0: # Augment only if downsampling the trajectories
-		M = np.eye(downsample_len)*2
-		for i in range(1,downsample_len):
-			M[i][i-1] = M[i-1][i] = -1
-
-		B = torch.Tensor(np.linalg.pinv(M) * 1e-6).to(device)
-		L = torch.linalg.cholesky(B) # faster/momry-friendly to directly give cholesky
-		num_trajs = len(train_data)
-		n_augments = 30
-		for i in range(num_trajs):
-			augments = torch.distributions.MultivariateNormal(torch.Tensor(train_data[i]).to(device).reshape(24, downsample_len), scale_tril=L).sample((n_augments,)).cpu().numpy()
-			train_data = np.concatenate([train_data,augments.reshape(n_augments, downsample_len, 4, 6)], 0)
-			train_labels = np.concatenate([train_labels,np.repeat(train_labels[i:i+1], augments.shape[0], axis=0)], 0)
-		print('Augmented Sequences: Training',train_data.shape, 'Testing', test_data.shape)
-		print('Augmented Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
 	return train_data, train_labels, test_data, test_labels
 
 if __name__=='__main__':
@@ -227,29 +114,24 @@ if __name__=='__main__':
 						help='Length to downsample trajectories to. If 0, no downsampling is performed (default: 0).')
 	parser.add_argument('--robot', action='store_true', default=False,
 						help='Whether to use HRI or HHI data (default: False -> HHI)')
-	# parser.add_argument('--no-augment', action="store_true",
-	# 					help='Whether to skip the trajectory augmentation or not. (default: False).')
 	args = parser.parse_args()
 	
-	train_data, train_labels, test_data, test_labels = preproc(args.src_dir, args.downsample_len, robot=args.robot)
+	train_data, train_labels, test_data, test_labels = preproc(args.src_dir, args.robot)
 
 	if not os.path.exists(args.dst_dir):
 		os.mkdir(args.dst_dir)
 
 	if args.downsample_len == 0:
 		np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences.npz'), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
-		vae_train_data, tdm_train_data = vae_tdm_preproc(train_data, train_labels, robot=args.robot)
-		vae_test_data, tdm_test_data = vae_tdm_preproc(test_data, test_labels, robot=args.robot)
-		print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
-		print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
-		np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=vae_train_data, test_data=vae_test_data)
-		np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
 	else:
+		train_data, train_labels = downsample_trajs(train_data, train_labels, args.downsample_len)
 		np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences_augmented.npz'), data=train_data, labels=train_labels)
-		vae_train_data, tdm_train_data = vae_tdm_preproc(train_data, train_labels)
-		vae_test_data, tdm_test_data = vae_tdm_preproc(test_data, test_labels)
-		print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
-		print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
-		np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=vae_train_data, test_data=vae_test_data)
-		np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
-
+		args.robot = False
+	
+	vae_train_data, tdm_train_data = vae_tdm_preproc(train_data, train_labels, robot=args.robot)
+	vae_test_data, tdm_test_data = vae_tdm_preproc(test_data, test_labels, robot=args.robot)
+	print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
+	print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
+	np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=vae_train_data, test_data=vae_test_data)
+	np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
+		
