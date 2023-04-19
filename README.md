@@ -14,16 +14,29 @@ Clone the repository [`https://github.com/jbutepage/human_robot_interaction_data
 
 ## Data Preprocessing
 
-To preprocess the data according to the paper, run: 
+To preprocess the data according to the paper, run:
 
 ```bash
-python data_preproc.py --dst-dir /path/to/destination
+python data_preproc.py --dst-dir /path/to/preproc_data
 ```
+
+This creates three files, `labelled_sequences.npz`, `vae_data.npz` and `tdm_data.npz`.
 
 ## Running Training
 
+Once the data preprocessing is done, you can train the VAE by running:
+
+```bash
+python train_vae.py --src /path/to/preproc_data/vae_data.npz (--results /path/to/results_dir)
+```
+
+To visualise the resutls of the training, run:
+
+```bash
+python test_hh_vae.py --src /path/to/preproc_data/vae_data.npz --ckpt /path/to/model.pth
+```
+
 ## TODO
 
-- Update Readme with running information
-
-
+- Update Code and README for running TDM
+- Update Code and README for running HRI
