@@ -19,7 +19,10 @@ class VAE(AE):
 		zpost_dist = Normal(self.latent_mean(enc), self.latent_std(enc))
 		if encode_only:
 			return zpost_dist
-		zpost_samples = zpost_dist.rsample()
+		if self.training:
+			zpost_samples = zpost_dist.mean
+		else:
+			zpost_samples = zpost_dist.rsample()
 		x_gen = self._output(self._decoder(zpost_samples))
 		return x_gen, zpost_samples, zpost_dist
 

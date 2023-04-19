@@ -56,10 +56,10 @@ def preproc(src_dir, robot=False):
 				data_file_p2 = os.path.join(src_dir, 'hh','p2',action+'_s2_'+trial+'.csv')
 				data_p2, _, _, _ = read_data(data_file_p2)
 				segment_file = os.path.join(src_dir, 'hh', 'segmentation', action+'_'+trial+'.npy')
+				segments = np.load(segment_file)
 			
 			data_p1, _, _, _ = read_data(data_file_p1)
 		
-			segments = np.load(segment_file)
 
 			for s in segments:
 				traj1 = data_p1[s[0]:s[1], idx_list] # seq_len, 4 ,3
@@ -108,7 +108,7 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Data preprocessing for Right arm trajectories of Buetepage et al. (2020).')
 	parser.add_argument('--src-dir', type=str, default='./human_robot_interaction_data', metavar='SRC',
 						help='Path where https://github.com/souljaboy764/human_robot_interaction_data is extracted to read csv files (default: ./human_robot_interaction_data).')
-	parser.add_argument('--dst-dir', type=str, default='./data/orig_bothactors_downsamples/', metavar='DST',
+	parser.add_argument('--dst-dir', type=str, default='/tmp/data/', metavar='DST',
 						help='Path to save the processed trajectories to (default: ./data).')
 	parser.add_argument('--downsample-len', type=int, default=0, metavar='NEW_LEN',
 						help='Length to downsample trajectories to. If 0, no downsampling is performed (default: 0).')
