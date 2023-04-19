@@ -7,12 +7,9 @@ import numpy as np
 import os, datetime, argparse
 
 import networks
-from config import global_config, human_vae_config
+from config import global_config, human_vae_config, robot_vae_config
+from utils import *
 
-import matplotlib.pyplot as plt
-from matplotlib.cm import get_cmap
-
-colors_10 = get_cmap('tab10')
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def run_iters_vae(iterator, model, optimizer):
@@ -41,57 +38,23 @@ def run_iters_vae(iterator, model, optimizer):
 
 	return total_recon, total_kl, total_loss, x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims), zpost_samples, x.reshape(-1, model.window_size, model.num_joints, model.joint_dims), iters
 
-def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_done, prefix):
-	writer.add_histogram(prefix+'/loss', sum(loss), steps_done)
-	writer.add_scalar(prefix+'/kl_div', sum(kl), steps_done)
-	writer.add_scalar(prefix+'/recon_loss', sum(recon), steps_done)
-	
-	writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
-	batch_size, window_size, num_joints, joint_dims = x_gen.shape
-	x_gen = x_gen[:5]
-	x = x[:5]
-	
-	fig, ax = plt.subplots(nrows=5, ncols=num_joints, figsize=(28, 16), sharex=True, sharey=True)
-	fig.tight_layout(pad=0, h_pad=0, w_pad=0)
-
-	plt.subplots_adjust(
-		left=0.05,  # the left side of the subplots of the figure
-		right=0.95,  # the right side of the subplots of the figure
-		bottom=0.05,  # the bottom of the subplots of the figure
-		top=0.95,  # the top of the subplots of the figure
-		wspace=0.05,  # the amount of width reserved for blank space between subplots
-		hspace=0.05,  # the amount of height reserved for white space between subplots
-	)
-	x = x.cpu().detach().numpy()
-	x_gen = x_gen.cpu().detach().numpy()
-	for i in range(5):
-		for j in range(num_joints):
-			ax[i][j].set(xlim=(0, window_size - 1))
-			color_counter = 0
-			for dim in range(joint_dims):
-				ax[i][j].plot(x[i, :, j, dim], color=colors_10(color_counter%10))
-				ax[i][j].plot(x_gen[i, :, j, dim], linestyle='--', color=colors_10(color_counter % 10))
-				color_counter += 1
-
-	fig.canvas.draw()
-	writer.add_figure('sample reconstruction', fig, steps_done)
-	plt.close(fig)
-
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
 	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
 						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
 	parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
-						help='Path to read training and testing data (default: ./data/orig/vae/data.npz).')
-	parser.add_argument('--model', type=str, default='VAE', metavar='AE', choices=['AE', 'VAE'],
-						help='Which model to use (AE or VAE) (default: VAE).')					
+						help='Path to read training and testing data (default: ./data/orig/vae/data.npz).') # ./data/orig_hr/vae_data.npz for HRI
+	parser.add_argument('--model', type=str, default='VAE', metavar='AE', choices=['AE', 'VAE', "AE_HRI", "VAE_HRI"],
+						help='Which model to use (AE, VAE, AE_HRI, VAE_HRI) (default: VAE).')					
 	args = parser.parse_args()
 	torch.manual_seed(128542)
 	torch.autograd.set_detect_anomaly(True)
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+	is_hri = args.model.split('_')[-1]=='HRI'
+	args.model = args.model.split('_')[0]
 	config = global_config()
-	vae_config = human_vae_config()
+	vae_config = robot_vae_config() if is_hri else human_vae_config()
 
 	DEFAULT_RESULTS_FOLDER = args.results
 	MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
@@ -125,21 +88,25 @@ if __name__=='__main__':
 	with np.load(args.src, allow_pickle=True) as data:
 		train_data = np.array(data['train_data']).astype(np.float32)
 		test_data = np.array(data['test_data']).astype(np.float32)
-		num_samples, dim = train_data.shape
-		train_p1 = train_data[:, :dim//2]
-		train_p2 = train_data[:, dim//2:]
-		test_p1 = test_data[:, :dim//2]
-		test_p2 = test_data[:, dim//2:]
-		train_data = np.vstack([train_p1, train_p2])
-		test_data = np.vstack([test_p1, test_p2])
+		if is_hri:
+			# Training only the robot degrees of freedom
+			train_data = train_data[:, -model.input_dim:]
+			test_data = test_data[:, -model.input_dim:]
+		else:
+			num_samples, dim = train_data.shape
+			train_p1 = train_data[:, :dim//2]
+			train_p2 = train_data[:, dim//2:]
+			test_p1 = test_data[:, :dim//2]
+			test_p2 = test_data[:, dim//2:]
+			train_data = np.vstack([train_p1, train_p2])
+			test_data = np.vstack([test_p1, test_p2])
+
 		train_iterator = DataLoader(train_data, batch_size=model.batch_size, shuffle=True)
 		test_iterator = DataLoader(test_data, batch_size=model.batch_size, shuffle=True)
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
-	# model.eval()
-	# writer.add_graph(model, torch.Tensor(test_data[:10]).to(device))
-	# model.train()
+	
 	s = ''
 	for k in config.__dict__:
 		s += str(k) + ' : ' + str(config.__dict__[k]) + '\n'

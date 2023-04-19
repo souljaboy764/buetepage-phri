@@ -41,9 +41,11 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 		kl_loss_1 = torch.distributions.kl_divergence(zd1_dist, zx1_dist)[mask].mean()
 		kl_loss_2 = torch.distributions.kl_divergence(zd2_dist, zx2_dist)[mask].mean()
 		
-		d1_logprobs = d1_dist.log_prob(d1_samples)[mask]
-		d2_logprobs = d2_dist.log_prob(d2_samples)[mask]
-		jsd = JSD(d1_logprobs, d2_logprobs, log_targets=True, reduction='sum')
+		d11_logprobs = d1_dist.log_prob(d1_samples)[mask]
+		d12_logprobs = d2_dist.log_prob(d1_samples)[mask]
+		d21_logprobs = d1_dist.log_prob(d2_samples)[mask]	
+		d22_logprobs = d2_dist.log_prob(d2_samples)[mask]
+		jsd = JSD(d11_logprobs, d12_logprobs, d21_logprobs, d22_logprobs, log_targets=True, reduction='sum')
 
 		loss = kl_loss_1 + kl_loss_2 + jsd
 		
@@ -75,7 +77,7 @@ def write_summaries_tdm(writer, loss, jsd, kl_1, kl_2, d1_samples, d2_samples, s
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
-	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', default='logs/results/02231424/models/final.pth',
+	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', default='logs/vae_hh_orig_oldcommit_AdamW_07011535_tdmfixed/models/final.pth',
 						help='Path to the VAE checkpoint, where the TDM models will also be saved.')
 	parser.add_argument('--src', type=str, default='./data/orig_bothactors/tdm_data.npz', metavar='DATA',
 						help='Path to read training and testin data (default: ./data/orig_bothactors/tdm_data.npz).')
@@ -87,7 +89,7 @@ if __name__=='__main__':
 	config = global_config()
 	tdm_config = human_tdm_config()
 
-	DEFAULT_RESULTS_FOLDER = os.path.join(os.path.dirname(os.path.dirname(args.vae_ckpt)))
+	DEFAULT_RESULTS_FOLDER = os.path.dirname(os.path.dirname(args.vae_ckpt))
 	VAE_MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
 	MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, 'tdm', "models")
 	os.makedirs(MODELS_FOLDER,exist_ok=True)
