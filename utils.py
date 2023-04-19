@@ -94,33 +94,69 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 	writer.add_scalar(prefix+'/kl_div', sum(kl), steps_done)
 	writer.add_scalar(prefix+'/recon_loss', sum(recon), steps_done)
 	
-	# writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
-	batch_size, window_size, num_joints, joint_dims = x_gen.shape
-	x_gen = x_gen[:5]
-	x = x[:5]
+	# # writer.add_embedding(zx_samples[:100],global_step=steps_done, tag=prefix+'/q(z|x)')
+	# batch_size, window_size, num_joints, joint_dims = x_gen.shape
+	# x_gen = x_gen[:5]
+	# x = x[:5]
 	
-	fig, ax = plt.subplots(nrows=5, ncols=num_joints, figsize=(28, 16), sharex=True, sharey=True)
-	fig.tight_layout(pad=0, h_pad=0, w_pad=0)
+	# fig, ax = plt.subplots(nrows=5, ncols=num_joints, figsize=(28, 16), sharex=True, sharey=True)
+	# fig.tight_layout(pad=0, h_pad=0, w_pad=0)
 
-	plt.subplots_adjust(
-		left=0.05,  # the left side of the subplots of the figure
-		right=0.95,  # the right side of the subplots of the figure
-		bottom=0.05,  # the bottom of the subplots of the figure
-		top=0.95,  # the top of the subplots of the figure
-		wspace=0.05,  # the amount of width reserved for blank space between subplots
-		hspace=0.05,  # the amount of height reserved for white space between subplots
-	)
-	x = x.cpu().detach().numpy()
-	x_gen = x_gen.cpu().detach().numpy()
-	for i in range(5):
-		for j in range(num_joints):
-			ax[i][j].set(xlim=(0, window_size - 1))
-			color_counter = 0
-			for dim in range(joint_dims):
-				ax[i][j].plot(x[i, :, j, dim], color=colors_10(color_counter%10))
-				ax[i][j].plot(x_gen[i, :, j, dim], linestyle='--', color=colors_10(color_counter % 10))
-				color_counter += 1
+	# plt.subplots_adjust(
+	# 	left=0.05,  # the left side of the subplots of the figure
+	# 	right=0.95,  # the right side of the subplots of the figure
+	# 	bottom=0.05,  # the bottom of the subplots of the figure
+	# 	top=0.95,  # the top of the subplots of the figure
+	# 	wspace=0.05,  # the amount of width reserved for blank space between subplots
+	# 	hspace=0.05,  # the amount of height reserved for white space between subplots
+	# )
+	# x = x.cpu().detach().numpy()
+	# x_gen = x_gen.cpu().detach().numpy()
+	# for i in range(5):
+	# 	for j in range(num_joints):
+	# 		ax[i][j].set(xlim=(0, window_size - 1))
+	# 		color_counter = 0
+	# 		for dim in range(joint_dims):
+	# 			ax[i][j].plot(x[i, :, j, dim], color=colors_10(color_counter%10))
+	# 			ax[i][j].plot(x_gen[i, :, j, dim], linestyle='--', color=colors_10(color_counter % 10))
+	# 			color_counter += 1
 
-	fig.canvas.draw()
-	writer.add_figure('sample reconstruction', fig, steps_done)
-	plt.close(fig)
+	# fig.canvas.draw()
+	# writer.add_figure('sample reconstruction', fig, steps_done)
+	# plt.close(fig)
+
+def prepare_axis():
+	fig = plt.figure()
+	ax = fig.add_subplot(projection='3d')
+	plt.ion()
+	ax.view_init(0, -0)
+	
+	return fig, ax
+
+def reset_axis(ax, variant = None, action = None, frame_idx = None):
+	ax.cla()
+	ax.set_xlabel('X')
+	ax.set_ylabel('Y')
+	ax.set_zlabel('Z')
+	ax.set_facecolor('none')
+	ax.set_xlim3d([-0.9, 0.1])
+	ax.set_ylim3d([-0.1, 0.9])
+	ax.set_zlim3d([-0.65, 0.35])
+	title = ""
+	if variant is not None and action is not None and frame_idx is not None:
+		ax.set_title(variant + " " + action + "\nFrame: {}".format(frame_idx))
+	return ax
+
+def visualize_skeleton(ax, trajectory, color='r', linestyle='-'):
+	# Skeleton shape: W, J, D (window size x num joints x joint dims)
+	# Assuming that num joints = 4 and dims = 3
+	assert len(trajectory.shape) ==  3 and trajectory.shape[1] == 4 and trajectory.shape[2] == 3
+	
+	for w in range(trajectory.shape[0]):
+		x = trajectory[w, :, 0]
+		y = trajectory[w, :, 1]
+		z = trajectory[w, :, 2]
+		# ax.scatter(x, y, z, color=color, marker='o')
+		ax.plot(x, y, z, color='k', linestyle=linestyle, marker='o', markerfacecolor=color)
+	
+	return ax

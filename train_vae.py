@@ -40,11 +40,11 @@ def run_iters_vae(iterator, model, optimizer):
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
-	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='RES',
+	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='DST',
 						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
-	parser.add_argument('--src', type=str, default='./data/orig/vae/data.npz', metavar='RES',
+	parser.add_argument('--src', type=str, default='./data/orig/vae_data.npz', metavar='SRC',
 						help='Path to read training and testing data (default: ./data/orig/vae/data.npz).') # ./data/orig_hr/vae_data.npz for HRI
-	parser.add_argument('--model', type=str, default='VAE', metavar='AE', choices=['AE', 'VAE', "AE_HRI", "VAE_HRI"],
+	parser.add_argument('--model', type=str, default='VAE', metavar='TYPE', choices=['AE', 'VAE', "AE_HRI", "VAE_HRI"],
 						help='Which model to use (AE, VAE, AE_HRI, VAE_HRI) (default: VAE).')					
 	args = parser.parse_args()
 	torch.manual_seed(128542)
@@ -56,13 +56,12 @@ if __name__=='__main__':
 	config = global_config()
 	vae_config = robot_vae_config() if is_hri else human_vae_config()
 
-	DEFAULT_RESULTS_FOLDER = args.results
-	MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
-	SUMMARIES_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "summary")
+	MODELS_FOLDER = os.path.join(args.results, "models")
+	SUMMARIES_FOLDER = os.path.join(args.results, "summary")
 	global_step = 0
-	if not os.path.exists(DEFAULT_RESULTS_FOLDER):
-		print("Creating Result Directories")
-		os.makedirs(DEFAULT_RESULTS_FOLDER)
+	if not os.path.exists(args.results):
+		print("Creating Result Directories:",args.results)
+		os.makedirs(args.results)
 		os.makedirs(MODELS_FOLDER)
 		os.makedirs(SUMMARIES_FOLDER)
 		np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, vae_config=vae_config)
