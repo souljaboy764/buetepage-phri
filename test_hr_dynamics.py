@@ -11,15 +11,16 @@ import os, datetime, argparse
 import networks
 from utils import *
 from config import *
+import dataloaders
 
 if __name__=='__main__':
-	parser = argparse.ArgumentParser(description='SKID Training')
+	parser = argparse.ArgumentParser(description='Buetepage HRI Dynamics Training')
 	parser.add_argument('--human-ckpt', type=str, metavar='HUMAN-CKPT', default='logs/vae_hh_orig_oldcommit_AdamW_07011535/tdm/models/tdm_final.pth',
 						help='Path to the Human dynamics checkpoint.')
 	parser.add_argument('--robot-ckpt', type=str, metavar='ROBOT-CKPT', default='logs/vae_hr_AdamW_07031331/models/final.pth',
 						help='Path to the VAE checkpoint, where the TDM models will also be saved.')
-	parser.add_argument('--src', type=str, default='./data/orig_hr/tdm_data.npz', metavar='DATA',
-						help='Path to read training and testin data (default: ./data/orig_hr/tdm_data.npz).')
+	parser.add_argument('--src', type=str, default='./data/orig_hr/labelled_sequences.npz', metavar='DATA',
+						help='Path to read training and testing data (default: ./data/orig_hr/labelled_sequences.npz).')
 	args = parser.parse_args()
 	torch.manual_seed(128542)
 	torch.autograd.set_detect_anomaly(True)
@@ -38,9 +39,11 @@ if __name__=='__main__':
 	if os.path.exists(os.path.join(MODELS_FOLDER,'hyperparams.npz')):
 		hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
 		# hri_args = hyperparams['args'].item() # overwrite args if loading from checkpoint
-		hri_config = hyperparams['tdm_config'].item()
+		hri_config = hyperparams['hri_config'].item()
+		config = hyperparams['global_config'].item()
 	else:
 		hri_config = hri_config()
+		config = global_config()
 
 	robot_vae_hyperparams = np.load(os.path.join(VAE_MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
 	robot_vae_args = robot_vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
@@ -63,21 +66,31 @@ if __name__=='__main__':
 	hri.load_state_dict(ckpt['model'])
 	hri.eval()
 	
-	print("Reading Data")
-	with np.load(args.src, allow_pickle=True) as data:
+	# print("Reading Data")
+	# with np.load(args.src, allow_pickle=True) as data:
 		
-		test_data_np = data['test_data']
-		test_data = [torch.Tensor(traj) for traj in test_data_np]
-		test_num = len(test_data)
-		lens = []
-		for traj in test_data:
-			lens.append(traj.shape[0])
+	# 	test_data_np = data['test_data']
+	# 	test_data = [torch.Tensor(traj) for traj in test_data_np]
+	# 	test_num = len(test_data)
+	# 	lens = []
+	# 	for traj in test_data:
+	# 		lens.append(traj.shape[0])
 
-		padded_sequences = pad_sequence(test_data, batch_first=True, padding_value=1.)
-		test_iterator = DataLoader(list(zip(padded_sequences, lens)), batch_size=len(test_data), shuffle=False)
-		p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
-		r2_hri_idx = np.concatenate([480+np.arange(7),np.arange(-5,0)])
-		r2_vae_idx = np.arange(280) + 480
+	# 	padded_sequences = pad_sequence(test_data, batch_first=True, padding_value=1.)
+	# 	test_iterator = DataLoader(list(zip(padded_sequences, lens)), batch_size=len(test_data), shuffle=False)
+	print("Reading Data")
+	test_data = [torch.Tensor(traj) for traj in dataloaders.buetepage_hr.SequenceWindowDataset(args.src, train=False, window_length=config.WINDOW_LEN).traj_data]
+	test_num = len(test_data)
+	lens = []
+	for traj in test_data:
+		lens.append(traj.shape[0])
+
+	padded_sequences = pad_sequence(test_data, batch_first=True, padding_value=1.)
+	test_iterator = DataLoader(list(zip(padded_sequences,lens)), batch_size=len(padded_sequences), shuffle=True)
+	
+	p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
+	r2_hri_idx = np.concatenate([480+np.arange(7),np.arange(-5,0)])
+	r2_vae_idx = np.arange(280) + 480
 
 	print("Starting Evaluation")
 	total_loss = []
@@ -99,9 +112,12 @@ if __name__=='__main__':
 		x_gen.append(x_r2_gen.detach().cpu().numpy())
 
 	total_loss = np.concatenate(total_loss,axis=0)
+	print(total_loss.shape)
+	np.savez_compressed(os.path.join(DEFAULT_RESULTS_FOLDER,'recon_error.npz'), error=total_loss, lens=lens)
 	# x_gen = np.concatenate(x_gen,axis=0)
 	x_gen = np.array(x_gen)
 	print(total_loss.mean())
 	print(np.shape(x_gen))
 	print(np.shape(padded_sequences.cpu().detach().numpy()))
-	np.savez_compressed('hri_test.npz', x_gen=x_gen, test_data=padded_sequences.cpu().detach().numpy(), lens=lens)
+	print(os.path.join(DEFAULT_RESULTS_FOLDER,'hri_test.npz'))
+	np.savez_compressed(os.path.join(DEFAULT_RESULTS_FOLDER,'hri_test.npz'), x_gen=x_gen, test_data=padded_sequences.cpu().detach().numpy(), lens=lens)
