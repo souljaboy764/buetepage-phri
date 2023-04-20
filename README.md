@@ -30,11 +30,7 @@ Once the data preprocessing is done, you can train the VAE by running:
 python train_vae.py --src /path/to/preproc_data/vae_data.npz (--results /path/to/results_dir)
 ```
 
-To visualise the resutls of the training, run:
-
-```bash
-python test_hh_vae.py --src /path/to/preproc_data/vae_data.npz --ckpt /path/to/model.pth
-```
+To visualise the resutls of the training, run the jupyter notebook []`test_hh_vae.ipynb`](./test_hh_vae.ipynb) giving the path to the trained VAE model (.pth file) when it asks for user input.
 
 ## TODO
 

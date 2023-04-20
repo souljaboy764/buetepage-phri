@@ -128,20 +128,25 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 def prepare_axis():
 	fig = plt.figure()
 	ax = fig.add_subplot(projection='3d')
-	plt.ion()
-	ax.view_init(0, -0)
-	
+	# plt.ion()
+	ax.view_init(0, -90)
+	ax.set_xlim3d([-0.9, 0.1])
+	ax.set_ylim3d([-0.1, 0.9])
+	ax.set_zlim3d([-0.65, 0.35])
 	return fig, ax
 
 def reset_axis(ax, variant = None, action = None, frame_idx = None):
+	xlim = ax.get_xlim()
+	ylim = ax.get_ylim()
+	zlim = ax.get_zlim()
 	ax.cla()
 	ax.set_xlabel('X')
 	ax.set_ylabel('Y')
 	ax.set_zlabel('Z')
 	ax.set_facecolor('none')
-	ax.set_xlim3d([-0.9, 0.1])
-	ax.set_ylim3d([-0.1, 0.9])
-	ax.set_zlim3d([-0.65, 0.35])
+	ax.set_xlim3d(xlim)
+	ax.set_ylim3d(ylim)
+	ax.set_zlim3d(zlim)
 	title = ""
 	if variant is not None and action is not None and frame_idx is not None:
 		ax.set_title(variant + " " + action + "\nFrame: {}".format(frame_idx))
