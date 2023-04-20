@@ -77,10 +77,10 @@ def write_summaries_tdm(writer, loss, jsd, kl_1, kl_2, d1_samples, d2_samples, s
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
-	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', default='logs/vae_hh_orig_oldcommit_AdamW_07011535_tdmfixed/models/final.pth',
+	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', required=True,
 						help='Path to the VAE checkpoint, where the TDM models will also be saved.')
-	parser.add_argument('--src', type=str, default='./data/orig_bothactors/tdm_data.npz', metavar='DATA',
-						help='Path to read training and testin data (default: ./data/orig_bothactors/tdm_data.npz).')
+	parser.add_argument('--src', type=str, default='./data/hh/tdm_data.npz', metavar='DATA',
+						help='Path to read training and testin data (default: ./data/hh/tdm_data.npz).')
 	args = parser.parse_args()
 	torch.manual_seed(128542)
 	torch.autograd.set_detect_anomaly(True)

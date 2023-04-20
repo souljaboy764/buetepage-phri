@@ -42,8 +42,8 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
 	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='DST',
 						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
-	parser.add_argument('--src', type=str, default='./data/orig/vae_data.npz', metavar='SRC',
-						help='Path to read training and testing data (default: ./data/orig/vae/data.npz).') # ./data/orig_hr/vae_data.npz for HRI
+	parser.add_argument('--src', type=str, default='./data/hh/vae_data.npz', metavar='SRC',
+						help='Path to read training and testing data (default: ./data/hh/vae_data.npz).') # ./data/hr/vae_data.npz for HRI
 	parser.add_argument('--model', type=str, default='VAE', metavar='TYPE', choices=['AE', 'VAE', "AE_HRI", "VAE_HRI"],
 						help='Which model to use (AE, VAE, AE_HRI, VAE_HRI) (default: VAE).')					
 	args = parser.parse_args()

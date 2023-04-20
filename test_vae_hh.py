@@ -8,8 +8,8 @@ from utils import *
 parser = argparse.ArgumentParser(description='Buetepage Human VAE Testing')
 parser.add_argument('--ckpt', type=str, required=True, metavar='CKPT',
 					help='Checkpoint to test')
-parser.add_argument('--src', type=str, default='./data/orig/vae_data.npz', metavar='RES',
-					help='Path to read training and testin data (default: ./data/orig/vae_data.npz).')
+parser.add_argument('--src', type=str, default='./data/hh/vae_data.npz', metavar='RES',
+					help='Path to read training and testin data (default: ./data/hh/vae_data.npz).')
 args = parser.parse_args()
 torch.autograd.set_detect_anomaly(True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
