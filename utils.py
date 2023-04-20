@@ -129,10 +129,10 @@ def prepare_axis():
 	fig = plt.figure()
 	ax = fig.add_subplot(projection='3d')
 	# plt.ion()
-	ax.view_init(0, -90)
-	ax.set_xlim3d([-0.9, 0.1])
-	ax.set_ylim3d([-0.1, 0.9])
-	ax.set_zlim3d([-0.65, 0.35])
+	ax.view_init(25, -155)
+	ax.set_xlim3d([-0.05, 0.75])
+	ax.set_ylim3d([-0.3, 0.5])
+	ax.set_zlim3d([-0.8, 0.2])
 	return fig, ax
 
 def reset_axis(ax, variant = None, action = None, frame_idx = None):
@@ -152,16 +152,11 @@ def reset_axis(ax, variant = None, action = None, frame_idx = None):
 		ax.set_title(variant + " " + action + "\nFrame: {}".format(frame_idx))
 	return ax
 
-def visualize_skeleton(ax, trajectory, color='r', linestyle='-'):
-	# Skeleton shape: W, J, D (window size x num joints x joint dims)
+def visualize_skeleton(ax, trajectory, **kwargs):
+	# trajectory shape: W, J, D (window size x num joints x joint dims)
 	# Assuming that num joints = 4 and dims = 3
 	assert len(trajectory.shape) ==  3 and trajectory.shape[1] == 4 and trajectory.shape[2] == 3
-	
 	for w in range(trajectory.shape[0]):
-		x = trajectory[w, :, 0]
-		y = trajectory[w, :, 1]
-		z = trajectory[w, :, 2]
-		# ax.scatter(x, y, z, color=color, marker='o')
-		ax.plot(x, y, z, color='k', linestyle=linestyle, marker='o', markerfacecolor=color)
+		ax.plot(trajectory[w, :, 0], trajectory[w, :, 1], trajectory[w, :, 2], color='k', marker='o', **kwargs)
 	
 	return ax

@@ -55,10 +55,14 @@ def preproc(src_dir, robot=False):
 				data_file_p1 = os.path.join(src_dir, 'hh','p1',action+'_s1_'+trial+'.csv')
 				data_file_p2 = os.path.join(src_dir, 'hh','p2',action+'_s2_'+trial+'.csv')
 				data_p2, _, _, _ = read_data(data_file_p2)
+				data_p2[..., [0,1,2]]  = data_p2[..., [2,0,1]]
+				data_p2[..., 1] *= -1
 				segment_file = os.path.join(src_dir, 'hh', 'segmentation', action+'_'+trial+'.npy')
 				segments = np.load(segment_file)
 			
 			data_p1, _, _, _ = read_data(data_file_p1)
+			data_p1[..., [0,1,2]]  = data_p1[..., [2,0,1]]
+			data_p1[..., 1] *= -1
 		
 
 			for s in segments:
