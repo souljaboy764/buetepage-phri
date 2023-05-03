@@ -12,10 +12,6 @@ import networks
 from config import global_config, human_tdm_config
 from utils import *
 
-p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
-p2_tdm_idx = np.concatenate([480+np.arange(12),np.arange(-5,0)])
-p1_vae_idx = np.arange(480)
-p2_vae_idx = np.arange(480) + 480
 def run_iters_tdm(iterator, tdm, vae, optimizer):
 	iters = 0
 	total_jsd = []

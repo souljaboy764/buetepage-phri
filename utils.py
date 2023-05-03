@@ -8,6 +8,11 @@ import matplotlib.pyplot as plt
 from matplotlib.cm import get_cmap
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 colors_10 = get_cmap('tab10')
+p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
+p2_tdm_idx = np.concatenate([480+np.arange(12),np.arange(-5,0)])
+p1_vae_idx = np.arange(480)
+p2_vae_idx = np.arange(480) + 480
+
 
 def downsample_trajs(train_data, train_labels, downsample_len):
 	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(4,1,1)

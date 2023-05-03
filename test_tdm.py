@@ -9,7 +9,6 @@ import os, argparse
 import networks
 from utils import *
 
-
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
 	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', default='logs/vae_hh_orig_oldcommit_AdamW_07011535_tdmfixed/models/final.pth',
