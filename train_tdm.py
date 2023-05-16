@@ -13,13 +13,14 @@ from config import global_config, human_tdm_config
 from utils import *
 
 def run_iters_tdm(iterator, tdm, vae, optimizer):
+	tdm_1, tdm_2 = tdm
 	iters = 0
 	total_jsd = []
 	total_kl_1 = []
 	total_kl_2 = []
 	total_loss = []
 	for i, (x, lens) in enumerate(iterator):
-		if tdm.training:
+		if tdm_1.training:
 			optimizer.zero_grad()
 		batch_size, seq_len, dims = x.shape
 		mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
@@ -28,8 +29,8 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 		x1_vae = x[:,:,p1_vae_idx]
 		x2_vae = x[:,:,p2_vae_idx]
 
-		zd1_dist, d1_samples, d1_dist = tdm(torch.nn.utils.rnn.pack_padded_sequence(x1_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
-		zd2_dist, d2_samples, d2_dist = tdm(torch.nn.utils.rnn.pack_padded_sequence(x2_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
+		zd1_dist, d1_samples, d1_dist = tdm_1(torch.nn.utils.rnn.pack_padded_sequence(x1_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
+		zd2_dist, d2_samples, d2_dist = tdm_2(torch.nn.utils.rnn.pack_padded_sequence(x2_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
 		with torch.no_grad():
 			zx1_dist = vae(x1_vae.to(device), True)
 			zx2_dist = vae(x2_vae.to(device), True)
@@ -41,18 +42,19 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 		d12_logprobs = d2_dist.log_prob(d1_samples)[mask]
 		d21_logprobs = d1_dist.log_prob(d2_samples)[mask]	
 		d22_logprobs = d2_dist.log_prob(d2_samples)[mask]
-		jsd = JSD(d11_logprobs, d12_logprobs, d21_logprobs, d22_logprobs, log_targets=True, reduction='sum')
+		jsd = JSD(d11_logprobs, d12_logprobs, d21_logprobs, d22_logprobs, log_targets=True, reduction='mean')
 
-		loss = kl_loss_1 + kl_loss_2 + jsd
+		loss = kl_loss_1 + kl_loss_2 + 0.1*jsd
 		
 		total_jsd.append(jsd)
 		total_kl_1.append(kl_loss_1)
 		total_kl_2.append(kl_loss_2)
 		total_loss.append(loss)
 
-		if tdm.training:
+		if tdm_1.training:
 			loss.backward()
-			nn.utils.clip_grad_norm_(tdm.parameters(), 1.0)
+			# nn.utils.clip_grad_norm_(tdm_1.parameters(), 1.0)
+			# nn.utils.clip_grad_norm_(tdm_2.parameters(), 1.0)
 			optimizer.step()
 		iters += 1
 
@@ -108,13 +110,15 @@ if __name__=='__main__':
 	vae_config = vae_hyperparams['vae_config'].item()
 
 	print("Creating Model and Optimizer")
-	tdm = networks.TDM(**(tdm_config.__dict__)).to(device)
-	optimizer = getattr(torch.optim, config.optimizer)(tdm.parameters(), lr=config.lr)
+	tdm_1 = networks.TDM(**(tdm_config.__dict__)).to(device)
+	tdm_2 = networks.TDM(**(tdm_config.__dict__)).to(device)
+	optimizer = getattr(torch.optim, config.optimizer)(list(tdm_1.parameters()) + list(tdm_2.parameters()), lr=config.lr)
 
 	if os.path.exists(os.path.join(MODELS_FOLDER, 'tdm_final.pth')):
 		print("Loading Checkpoints")
 		ckpt = torch.load(os.path.join(MODELS_FOLDER, 'tdm_final.pth'))
-		tdm.load_state_dict(ckpt['model'])
+		tdm_1.load_state_dict(ckpt['model_1'])
+		tdm_2.load_state_dict(ckpt['model_2'])
 		optimizer.load_state_dict(ckpt['optimizer'])
 		global_step = ckpt['epoch']
 
@@ -129,7 +133,7 @@ if __name__=='__main__':
 		train_data = [torch.Tensor(traj) for traj in data['train_data']]
 		test_data = [torch.Tensor(traj) for traj in data['test_data']]
 
-		while len(train_data)<tdm.batch_size:
+		while len(train_data)<tdm_1.batch_size:
 			train_data += train_data
 			
 		train_num = len(train_data)
@@ -166,12 +170,13 @@ if __name__=='__main__':
 
 	print("Starting Epochs")
 	for epoch in range(config.EPOCHS):
-		tdm.train()
+		tdm_1.train()
+		tdm_2.train()
 		packed_sequences = pack_padded_sequence(padded_sequences, lens, batch_first=True, enforce_sorted=False)
-		train_loss, train_jsd, train_kl_1, train_kl_2, d1_samples, d2_samples, iters = run_iters_tdm(train_iterator, tdm, vae, optimizer)
+		train_loss, train_jsd, train_kl_1, train_kl_2, d1_samples, d2_samples, iters = run_iters_tdm(train_iterator, [tdm_1, tdm_2], vae, optimizer)
 		steps_done = (epoch+1)*iters
 		write_summaries_tdm(writer, train_loss, train_jsd, train_kl_1, train_kl_2, d1_samples, d2_samples, steps_done, 'train')
-		for name, param in tdm.named_parameters():
+		for name, param in list(tdm_1.named_parameters())+list(tdm_2.named_parameters()):
 			if param.grad is None:
 				continue
 			value = param.reshape(-1)
@@ -182,18 +187,19 @@ if __name__=='__main__':
 			if torch.allclose(param.grad, torch.zeros_like(param.grad)):
 				print('zero grad for',name)
 		
-		tdm.eval()
+		tdm_1.eval()
+		tdm_2.eval()
 		with torch.no_grad():
-			test_loss, test_jsd, test_kl_1, test_kl_2, d1_samples, d2_samples, iters = run_iters_tdm(test_iterator, tdm, vae, optimizer)
+			test_loss, test_jsd, test_kl_1, test_kl_2, d1_samples, d2_samples, iters = run_iters_tdm(test_iterator, [tdm_1, tdm_2], vae, optimizer)
 			write_summaries_tdm(writer, test_loss, test_jsd, test_kl_1, test_kl_2, d1_samples, d2_samples, steps_done, 'test')
 
 		if epoch % config.EPOCHS_TO_SAVE == 0:
 			checkpoint_file = os.path.join(MODELS_FOLDER, 'tdm_%0.4d.pth'%(epoch))
-			torch.save({'model': tdm.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, checkpoint_file)
+			torch.save({'model_1': tdm_1.state_dict(), 'model_2': tdm_2.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, checkpoint_file)
 
 		print(epoch,'epochs done')
 
 	writer.flush()
 
 	checkpoint_file = os.path.join(MODELS_FOLDER, 'tdm_final.pth')
-	torch.save({'model': tdm.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': global_step}, checkpoint_file)
+	torch.save({'model_1': tdm_1.state_dict(), 'model_2': tdm_2.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': global_step}, checkpoint_file)

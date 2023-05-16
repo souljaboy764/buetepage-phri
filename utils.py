@@ -132,7 +132,7 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 
 def prepare_axis():
 	fig = plt.figure()
-	ax = fig.add_subplot(projection='3d')
+	ax = fig.add_subplot(1,2,1, projection='3d')
 	# plt.ion()
 	ax.view_init(25, -155)
 	ax.set_xlim3d([-0.05, 0.75])

@@ -18,6 +18,10 @@ class TDM(nn.Module):
 		# for i in range(len(enc_sizes)-1):
 		# 	self._encoder.append(nn.LSTM(enc_sizes[i], enc_sizes[i+1]))
 
+		encoder_layers = []
+		for i in range(self.num_lstm_layers):
+			encoder_layers.append(nn.LSTM(self.input_dim, self.lstm_hidden, 1, batch_first=True))
+			encoder_layers.append(self.activation)
 		self._encoder = nn.LSTM(self.input_dim, self.lstm_hidden, self.num_lstm_layers, batch_first=True)
 
 		self.latent_mean = nn.Linear(self.lstm_hidden, self.latent_dim)
