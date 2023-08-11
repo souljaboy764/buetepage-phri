@@ -99,10 +99,10 @@ def preproc(src_dir, robot=False):
 		train_labels += traj_labels[:split_idx]
 		test_labels += traj_labels[split_idx:]
 	
-	train_data = np.array(train_data)
-	test_data = np.array(test_data)
-	train_labels = np.array(train_labels)
-	test_labels = np.array(test_labels)
+	train_data = np.array(train_data, dtype=object)
+	test_data = np.array(test_data, dtype=object)
+	train_labels = np.array(train_labels, dtype=object)
+	test_labels = np.array(test_labels, dtype=object)
 	print('Sequences: Training',train_data.shape, 'Testing', test_data.shape)
 	print('Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
 	
@@ -112,7 +112,7 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Data preprocessing for Right arm trajectories of Buetepage et al. (2020).')
 	parser.add_argument('--src-dir', type=str, default='./human_robot_interaction_data', metavar='SRC',
 						help='Path where https://github.com/souljaboy764/human_robot_interaction_data is extracted to read csv files (default: ./human_robot_interaction_data).')
-	parser.add_argument('--dst-dir', type=str, default='/tmp/data/', metavar='DST',
+	parser.add_argument('--dst-dir', type=str, default='./data/', metavar='DST',
 						help='Path to save the processed trajectories to (default: ./data).')
 	parser.add_argument('--downsample-len', type=int, default=0, metavar='NEW_LEN',
 						help='Length to downsample trajectories to. If 0, no downsampling is performed (default: 0).')
@@ -126,10 +126,10 @@ if __name__=='__main__':
 		os.mkdir(args.dst_dir)
 
 	if args.downsample_len == 0:
-		np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences.npz'), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
+		np.savez_compressed(os.path.join(args.dst_dir, 'traj_data.npz'), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
 	else:
 		train_data, train_labels = downsample_trajs(train_data, train_labels, args.downsample_len)
-		np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences_augmented.npz'), data=train_data, labels=train_labels)
+		np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences_downsampled.npz'), data=train_data, labels=train_labels)
 		args.robot = False
 	
 	vae_train_data, tdm_train_data = vae_tdm_preproc(train_data, train_labels, robot=args.robot)
