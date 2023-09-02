@@ -47,10 +47,12 @@ def preproc(src_dir, robot=False):
 		trials = ['1'] if robot else ['1', '2']
 		for trial in trials:
 			if robot:
-				data_file_p1 = os.path.join(src_dir, 'hr','p1',action+'_s1_'+trial+'.csv')
-				data_file_p2 = os.path.join(src_dir, 'hr','r2',action+'.csv')
-				_, data_p2, _, _, _, _, _, _ = read_robot_data(data_file_p2)
-				segment_file = os.path.join(src_dir, 'hr', 'segmentation', action+'_'+trial+'.npy')
+				data_p1, data_r2 = read_hri_data(action, os.path.join(src_dir, 'hr'))
+				segments_file_h = os.path.join(src_dir, 'hr', 'segmentation', action+'_p1.npy')
+				segments_file_r = os.path.join(src_dir, 'hr', 'segmentation', action+'_r2.npy')
+				segments = np.load(segments_file_h)
+				segments_r = np.load(segments_file_r)
+
 			else:
 				data_file_p1 = os.path.join(src_dir, 'hh','p1',action+'_s1_'+trial+'.csv')
 				data_file_p2 = os.path.join(src_dir, 'hh','p2',action+'_s2_'+trial+'.csv')
@@ -60,17 +62,18 @@ def preproc(src_dir, robot=False):
 				segment_file = os.path.join(src_dir, 'hh', 'segmentation', action+'_'+trial+'.npy')
 				segments = np.load(segment_file)
 			
-			data_p1, _, _, _ = read_data(data_file_p1)
+				data_p1, _, _, _ = read_data(data_file_p1)
 			data_p1[..., [0,1,2]]  = data_p1[..., [2,0,1]]
 			data_p1[..., 1] *= -1
-		
-
-			for s in segments:
+	
+			for i in range(len(segments)):
+				s = segments[i]
 				traj1 = data_p1[s[0]:s[1], idx_list] # seq_len, 4 ,3
 				labels = np.zeros((traj1.shape[0],5))
 				labels[:] = action_onehot[a]
 				if robot:
-					traj2 = data_p2[s[0]:s[1]] # seq_len, 7
+					s_r = segments_r[i]
+					traj2 = data_r2[s_r[0]:s_r[1]] # seq_len, 7
 					traj1 = traj1 - traj1[0,0]
 					
 					# the indices where no movement occurs at the end are annotated as "not active". (Sec. 4.3.1 of the paper)
@@ -99,12 +102,12 @@ def preproc(src_dir, robot=False):
 		train_labels += traj_labels[:split_idx]
 		test_labels += traj_labels[split_idx:]
 	
-	train_data = np.array(train_data)
-	test_data = np.array(test_data)
-	train_labels = np.array(train_labels)
-	test_labels = np.array(test_labels)
-	print('Sequences: Training',train_data.shape, 'Testing', test_data.shape)
-	print('Labels: Training',train_labels.shape, 'Testing', test_labels.shape)
+	train_data = np.array(train_data, dtype=object)
+	test_data = np.array(test_data, dtype=object)
+	train_labels = np.array(train_labels, dtype=object)
+	test_labels = np.array(test_labels, dtype=object)
+	print('Sequences: Training', train_data.shape, 'Testing', test_data.shape)
+	print('Labels: Training', train_labels.shape, 'Testing', test_labels.shape)
 	
 	return train_data, train_labels, test_data, test_labels
 
@@ -126,16 +129,16 @@ if __name__=='__main__':
 		os.mkdir(args.dst_dir)
 
 	if args.downsample_len == 0:
-		np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences.npz'), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
+		np.savez_compressed(os.path.join(args.dst_dir, 'traj_data.npz'), train_data=train_data, train_labels=train_labels, test_data=test_data, test_labels=test_labels)
 	else:
 		train_data, train_labels = downsample_trajs(train_data, train_labels, args.downsample_len)
 		np.savez_compressed(os.path.join(args.dst_dir, 'labelled_sequences_augmented.npz'), data=train_data, labels=train_labels)
 		args.robot = False
 	
-	vae_train_data, tdm_train_data = vae_tdm_preproc(train_data, train_labels, robot=args.robot)
-	vae_test_data, tdm_test_data = vae_tdm_preproc(test_data, test_labels, robot=args.robot)
-	print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
-	print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
-	np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=vae_train_data, test_data=vae_test_data)
-	np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
+	# vae_train_data, tdm_train_data = vae_tdm_preproc(train_data, train_labels, robot=args.robot)
+	# vae_test_data, tdm_test_data = vae_tdm_preproc(test_data, test_labels, robot=args.robot)
+	# print('VAE Data: Training',vae_train_data.shape, 'Testing', vae_test_data.shape)
+	# print('TDM Data: Training',tdm_train_data.shape, 'Testing', tdm_test_data.shape)
+	# np.savez_compressed(os.path.join(args.dst_dir,'vae_data.npz'), train_data=vae_train_data, test_data=vae_test_data)
+	# np.savez_compressed(os.path.join(args.dst_dir,'tdm_data.npz'), train_data=tdm_train_data, test_data=tdm_test_data)
 		
