@@ -174,9 +174,9 @@ def reset_axis(ax, variant = None, action = None, frame_idx = None):
 def visualize_skeleton(ax, trajectory, **kwargs):
 	# trajectory shape: W, J, D (window size x num joints x joint dims)
 	# Assuming that num joints = 4 and dims = 3
-	assert len(trajectory.shape) ==  3 and trajectory.shape[1] == 4 and trajectory.shape[2] == 3
+	# assert len(trajectory.shape) ==  3 and trajectory.shape[1] == 4 and trajectory.shape[2] == 3
 	for w in range(trajectory.shape[0]):
-		ax.plot(trajectory[w, :, 0], trajectory[w, :, 1], trajectory[w, :, 2], color='k', marker='o', **kwargs)
+		ax.plot(trajectory[w, :, 0], trajectory[w, :, 1], trajectory[w, :, 2], color='k', marker='o', alpha=(w+1)/trajectory.shape[0], **kwargs)
 	
 	return ax
 
