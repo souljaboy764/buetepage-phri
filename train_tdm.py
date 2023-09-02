@@ -12,6 +12,8 @@ import networks
 from config import global_config, human_tdm_config
 from utils import *
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 def run_iters_tdm(iterator, tdm, vae, optimizer):
 	tdm_1, tdm_2 = tdm
 	iters = 0
@@ -22,29 +24,32 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 	for i, (x, lens) in enumerate(iterator):
 		if tdm_1.training:
 			optimizer.zero_grad()
-		batch_size, seq_len, dims = x.shape
-		mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
-		x1_tdm = x[:,:,p1_tdm_idx]
-		x2_tdm = x[:,:,p2_tdm_idx]
-		x1_vae = x[:,:,p1_vae_idx]
-		x2_vae = x[:,:,p2_vae_idx]
+		seq_len, dims = x[0].shape
+		# mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
+		x1_tdm = x[0][:,p1_tdm_idx]
+		x2_tdm = x[0][:,p2_tdm_idx]
+		x1_vae = x[0][:,p1_vae_idx]
+		x2_vae = x[0][:,p2_vae_idx]
 
-		zd1_dist, d1_samples, d1_dist = tdm_1(torch.nn.utils.rnn.pack_padded_sequence(x1_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
-		zd2_dist, d2_samples, d2_dist = tdm_2(torch.nn.utils.rnn.pack_padded_sequence(x2_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
+		# zd1_dist, d1_samples, d1_dist = tdm_1(torch.nn.utils.rnn.pack_padded_sequence(x1_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
+		# zd2_dist, d2_samples, d2_dist = tdm_2(torch.nn.utils.rnn.pack_padded_sequence(x2_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
+
+		zd1_dist, d1_samples, d1_dist = tdm_1(x1_tdm.to(device), seq_len)
+		zd2_dist, d2_samples, d2_dist = tdm_2(x2_tdm.to(device), seq_len)
 		with torch.no_grad():
 			zx1_dist = vae(x1_vae.to(device), True)
 			zx2_dist = vae(x2_vae.to(device), True)
 
-		kl_loss_1 = torch.distributions.kl_divergence(zd1_dist, zx1_dist)[mask].mean()
-		kl_loss_2 = torch.distributions.kl_divergence(zd2_dist, zx2_dist)[mask].mean()
-		
-		d11_logprobs = d1_dist.log_prob(d1_samples)[mask]
-		d12_logprobs = d2_dist.log_prob(d1_samples)[mask]
-		d21_logprobs = d1_dist.log_prob(d2_samples)[mask]	
-		d22_logprobs = d2_dist.log_prob(d2_samples)[mask]
+		kl_loss_1 = torch.distributions.kl_divergence(zd1_dist, zx1_dist).mean()
+		kl_loss_2 = torch.distributions.kl_divergence(zd2_dist, zx2_dist).mean()
+
+		d11_logprobs = d1_dist.log_prob(d1_samples)
+		d12_logprobs = d2_dist.log_prob(d1_samples)
+		d21_logprobs = d1_dist.log_prob(d2_samples)
+		d22_logprobs = d2_dist.log_prob(d2_samples)
 		jsd = JSD(d11_logprobs, d12_logprobs, d21_logprobs, d22_logprobs, log_targets=True, reduction='mean')
 
-		loss = kl_loss_1 + kl_loss_2 + 0.1*jsd
+		loss = kl_loss_1 + kl_loss_2 + jsd
 		
 		total_jsd.append(jsd)
 		total_kl_1.append(kl_loss_1)
@@ -58,19 +63,19 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 			optimizer.step()
 		iters += 1
 
-	return total_loss, total_jsd, total_kl_1, total_kl_2, d1_samples[mask], d2_samples[mask], iters
+	return total_loss, total_jsd, total_kl_1, total_kl_2, d1_samples, d2_samples, iters
 
 def write_summaries_tdm(writer, loss, jsd, kl_1, kl_2, d1_samples, d2_samples, steps_done, prefix):
 	writer.add_scalar(prefix+'/loss', sum(loss), steps_done)
 	writer.add_scalar(prefix+'/jsd_d', sum(jsd), steps_done)
 	writer.add_scalar(prefix+'/kl_div_z1', sum(kl_1), steps_done)
 	writer.add_scalar(prefix+'/kl_div_z2', sum(kl_2), steps_done)
-	d = torch.concat([d1_samples[:100], d2_samples[:100]], dim=0)
-	d_labels = torch.concat([torch.ones(100), torch.ones(100)+1],dim=0)
 
 	writer.add_histogram('latents/d1_samples', d1_samples.mean(0), steps_done)
 	writer.add_histogram('latents/d2_samples', d2_samples.mean(0), steps_done)
 
+	d = torch.concat([d1_samples[:100], d2_samples[:100]], dim=0)
+	d_labels = torch.concat([torch.ones(100), torch.ones(100)+1],dim=0)
 	# writer.add_embedding(d, metadata=d_labels, global_step=steps_done, tag=prefix+'/q(d|z)')
 
 if __name__=='__main__':
@@ -80,9 +85,8 @@ if __name__=='__main__':
 	parser.add_argument('--src', type=str, default='./data/hh/tdm_data.npz', metavar='DATA',
 						help='Path to read training and testin data (default: ./data/hh/tdm_data.npz).')
 	args = parser.parse_args()
-	torch.manual_seed(128542)
+	torch.manual_seed(42) # answer to life universe and everything OP
 	torch.autograd.set_detect_anomaly(True)
-	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 	config = global_config()
 	tdm_config = human_tdm_config()
@@ -143,13 +147,13 @@ if __name__=='__main__':
 		for traj in sequences:
 			lens.append(traj.shape[0])
 
-		padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=1.)
-		train_data = padded_sequences[:train_num]
+		# padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=0.)
+		train_data = sequences[:train_num]
 		train_lens = lens[:train_num]
-		test_data = padded_sequences[train_num:]
+		test_data = sequences[train_num:]
 		test_lens = lens[train_num:]
-		train_iterator = DataLoader(list(zip(train_data,train_lens)), batch_size=len(train_data), shuffle=True)
-		test_iterator = DataLoader(list(zip(test_data,test_lens)), batch_size=len(test_data), shuffle=True)
+		train_iterator = DataLoader(list(zip(train_data,train_lens)), batch_size=1, shuffle=True)
+		test_iterator = DataLoader(list(zip(test_data,test_lens)), batch_size=1, shuffle=True)
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
@@ -172,7 +176,6 @@ if __name__=='__main__':
 	for epoch in range(config.EPOCHS):
 		tdm_1.train()
 		tdm_2.train()
-		packed_sequences = pack_padded_sequence(padded_sequences, lens, batch_first=True, enforce_sorted=False)
 		train_loss, train_jsd, train_kl_1, train_kl_2, d1_samples, d2_samples, iters = run_iters_tdm(train_iterator, [tdm_1, tdm_2], vae, optimizer)
 		steps_done = (epoch+1)*iters
 		write_summaries_tdm(writer, train_loss, train_jsd, train_kl_1, train_kl_2, d1_samples, d2_samples, steps_done, 'train')

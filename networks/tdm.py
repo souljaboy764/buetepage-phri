@@ -40,7 +40,7 @@ class TDM(nn.Module):
 
 	def forward(self, x, seq_len):
 		enc,_ = self._encoder(x)
-		enc, _ = pad_packed_sequence(enc, batch_first=True, total_length=seq_len)
+		# enc, _ = pad_packed_sequence(enc, batch_first=True, total_length=seq_len)
 		enc = self.activation(enc)
 
 		d_dist = Normal(self.latent_mean(enc), self.latent_std(enc)+1e-4)

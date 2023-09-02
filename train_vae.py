@@ -10,6 +10,8 @@ import networks
 from config import global_config, human_vae_config, robot_vae_config
 from utils import *
 
+from mild_hri.dataloaders.buetepage import HHWindowDataset
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def run_iters_vae(iterator, model, optimizer):
@@ -40,9 +42,9 @@ def run_iters_vae(iterator, model, optimizer):
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
-	parser.add_argument('--results', type=str, default='./logs/results/'+datetime.datetime.now().strftime("%m%d%H%M"), metavar='DST',
-						help='Path for saving results (default: ./logs/results/MMDDHHmm).')
-	parser.add_argument('--src', type=str, default='./data/hh/vae_data.npz', metavar='SRC',
+	parser.add_argument('--results', type=str, default='./logs/debug', metavar='DST',
+						help='Path for saving results (default: ./logs/debug).')
+	parser.add_argument('--src', type=str, default='./data/2023/hh_20hz_3joints_xvel/vae_data.npz', metavar='SRC',
 						help='Path to read training and testing data (default: ./data/hh/vae_data.npz).') # ./data/hr/vae_data.npz for HRI
 	parser.add_argument('--model', type=str, default='VAE', metavar='TYPE', choices=['AE', 'VAE', "AE_HRI", "VAE_HRI"],
 						help='Which model to use (AE, VAE, AE_HRI, VAE_HRI) (default: VAE).')					
@@ -59,29 +61,25 @@ if __name__=='__main__':
 	MODELS_FOLDER = os.path.join(args.results, "models")
 	SUMMARIES_FOLDER = os.path.join(args.results, "summary")
 	global_step = 0
+	print("Creating Result Directories:",args.results)
 	if not os.path.exists(args.results):
-		print("Creating Result Directories:",args.results)
 		os.makedirs(args.results)
+	if not os.path.exists(MODELS_FOLDER):
 		os.makedirs(MODELS_FOLDER)
+	if not os.path.exists(SUMMARIES_FOLDER):
 		os.makedirs(SUMMARIES_FOLDER)
-		np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, vae_config=vae_config)
-
-	elif os.path.exists(os.path.join(MODELS_FOLDER,'hyperparams.npz')):
-		hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
-		args = hyperparams['args'].item() # overwrite args if loading from checkpoint
-		config = hyperparams['global_config'].item()
-		vae_config = hyperparams['vae_config'].item()
+	np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, vae_config=vae_config)
 
 	print("Creating Model and Optimizer")
 	model = getattr(networks, args.model)(**(vae_config.__dict__)).to(device)
 	optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
 
-	if os.path.exists(os.path.join(MODELS_FOLDER, 'final.pth')):
-		print("Loading Checkpoints")
-		ckpt = torch.load(os.path.join(MODELS_FOLDER, 'final.pth'))
-		model.load_state_dict(ckpt['model'])
-		optimizer.load_state_dict(ckpt['optimizer'])
-		global_step = ckpt['epoch']
+	# if os.path.exists(os.path.join(MODELS_FOLDER, 'final.pth')):
+	# 	print("Loading Checkpoints")
+	# 	ckpt = torch.load(os.path.join(MODELS_FOLDER, 'final.pth'))
+	# 	model.load_state_dict(ckpt['model'])
+	# 	optimizer.load_state_dict(ckpt['optimizer'])
+	# 	global_step = ckpt['epoch']
 
 	print("Reading Data")
 	with np.load(args.src, allow_pickle=True) as data:

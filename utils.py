@@ -11,35 +11,32 @@ from plotly.subplots import make_subplots
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 colors_10 = get_cmap('tab10')
-p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
-p2_tdm_idx = np.concatenate([480+np.arange(12),np.arange(-5,0)])
-p1_vae_idx = np.arange(480)
-p2_vae_idx = np.arange(480) + 480
+# p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
+# p2_tdm_idx = np.concatenate([480+np.arange(12),np.arange(-5,0)])
+# p1_vae_idx = np.arange(480)
+# p2_vae_idx = np.arange(480) + 480
+
+p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-5,0)])
+p2_tdm_idx = np.concatenate([90+np.arange(18),np.arange(-5,0)])
+p1_vae_idx = np.arange(90)
+p2_vae_idx = np.arange(90) + 90
 
 
 def downsample_trajs(train_data, train_labels, downsample_len):
-	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(4,1,1)
-	M = np.eye(downsample_len)*2
-	for i in range(1,downsample_len):
-		M[i][i-1] = M[i-1][i] = -1
-
-	B = torch.Tensor(np.linalg.pinv(M) * 1e-6).to(device)
-	L = torch.linalg.cholesky(B) # faster/memory-friendly to directly give cholesky
+	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(train_data[0].shape[1],1,1)
 	num_trajs = len(train_data)
-	n_augments = 30
 	for i in range(num_trajs):
+		old_shape=train_data[i].shape
 		train_data[i] = train_data[i].transpose(1,2,0) # 4, 3, seq_len
 		train_data[i] = torch.Tensor(train_data[i]).to(device).unsqueeze(2) # 4, 3, 1 seq_len
 		train_data[i] = torch.concat([train_data[i], torch.zeros_like(train_data[i])], dim=2) # 4, 3, 2 seq_len
 		
-		grid = affine_grid(theta, torch.Size([4, 3, 2, downsample_len]), align_corners=True)
+		grid = affine_grid(theta, torch.Size([old_shape[1], old_shape[2], 2, int(downsample_len*old_shape[0])]), align_corners=True)
 		train_data[i] = grid_sample(train_data[i].type(torch.float32), grid, align_corners=True) # 4, 3, 2 downsample_len
 		train_data[i] = train_data[i][:, :, 0].cpu().detach().numpy() # 4, 3, downsample_len
 		train_data[i] = train_data[i].transpose(2,0,1) # downsample_len, 4, 3
+		print(old_shape,train_data[i].shape)
 
-		augments = torch.distributions.MultivariateNormal(torch.Tensor(train_data[i]).to(device).reshape(24, downsample_len), scale_tril=L).sample((n_augments,)).cpu().numpy()
-		train_data = np.concatenate([train_data,augments.reshape(n_augments, downsample_len, 4, 6)], 0)
-		train_labels = np.concatenate([train_labels,np.repeat(train_labels[i:i+1], augments.shape[0], axis=0)], 0)
 	print('Augmented Sequences: Training', train_data.shape)
 	print('Augmented Labels: Training', train_labels.shape)
 	return train_data, train_labels
@@ -190,9 +187,7 @@ def plotly_skeleton(fig, trajectory, update=False, **kwargs):
 	assert len(trajectory.shape) ==  3 and trajectory.shape[1] == 4 and trajectory.shape[2] == 3
 	for w in range(trajectory.shape[0]):
 		if update:
-			fig[w].x=trajectory[w, :, 0]
-			fig[w].y=trajectory[w, :, 1]
-			fig[w].z=trajectory[w, :, 2]
+			fig.update_traces(patch={'x':trajectory[w, :, 0], 'y':trajectory[w, :, 1], 'z':trajectory[w, :, 2]}, selector=kwargs['start_idx']+w)
 		else:
 			fig.add_trace(go.Scatter3d(
 				x=trajectory[w, :, 0],
