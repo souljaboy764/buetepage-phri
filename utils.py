@@ -6,6 +6,9 @@ import numpy as np
 
 import matplotlib.pyplot as plt
 from matplotlib.cm import get_cmap
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 colors_10 = get_cmap('tab10')
 p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
@@ -140,6 +143,20 @@ def prepare_axis():
 	ax.set_zlim3d([-0.8, 0.2])
 	return fig, ax
 
+def prepare_axis_plotly():
+	fig = make_subplots(rows=1, cols=1,
+					specs=[[{'is_3d': True}]],
+					print_grid=False)
+	# fig.view_init(25, -155)
+	fig.update_layout(
+	    scene = dict(
+			xaxis = dict(range=[-0.05, 0.75],),
+			yaxis = dict(range=[-0.3, 0.5],),
+			zaxis = dict(range=[-0.8, 0.2],),
+		)
+	)
+	return fig
+
 def reset_axis(ax, variant = None, action = None, frame_idx = None):
 	xlim = ax.get_xlim()
 	ylim = ax.get_ylim()
@@ -165,3 +182,34 @@ def visualize_skeleton(ax, trajectory, **kwargs):
 		ax.plot(trajectory[w, :, 0], trajectory[w, :, 1], trajectory[w, :, 2], color='k', marker='o', **kwargs)
 	
 	return ax
+
+def plotly_skeleton(fig, trajectory, update=False, **kwargs):
+	# print(kwargs)
+	# trajectory shape: W, J, D (window size x num joints x joint dims)
+	# Assuming that num joints = 4 and dims = 3
+	assert len(trajectory.shape) ==  3 and trajectory.shape[1] == 4 and trajectory.shape[2] == 3
+	for w in range(trajectory.shape[0]):
+		if update:
+			fig[w].x=trajectory[w, :, 0]
+			fig[w].y=trajectory[w, :, 1]
+			fig[w].z=trajectory[w, :, 2]
+		else:
+			fig.add_trace(go.Scatter3d(
+				x=trajectory[w, :, 0],
+				y=trajectory[w, :, 1],
+				z=trajectory[w, :, 2],
+				mode='markers',
+				marker=dict(
+					size=10,
+					color=kwargs['color'],
+					opacity=(w+1)/trajectory.shape[0]
+				),
+				line=dict(
+					color='black',
+					width=4,
+					dash=kwargs['dash']
+				)
+
+			))
+		
+	return fig
