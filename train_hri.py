@@ -9,7 +9,7 @@ import numpy as np
 import os, datetime, argparse
 import matplotlib.pyplot as plt
 from matplotlib.cm import get_cmap
-import dataloaders
+# import dataloaders
 
 colors_10 = get_cmap('tab10')
 
@@ -17,33 +17,33 @@ import networks
 from config import *
 from utils import *
 
-p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
-r2_hri_idx = np.concatenate([480+np.arange(7),np.arange(-5,0)])
-r2_vae_idx = np.arange(280) + 480
+p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-5,0)])
+r2_hri_idx = np.concatenate([90+np.arange(4),np.arange(-5,0)])
+r2_vae_idx = 90 + np.arange(20)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def run_iters_hri(iterator, hri, robot_vae, human_tdm, optimizer):
 	iters = 0
 	total_loss = []
 	total_recon_loss = []
 	total_kl_loss = []
-	for i, (x, lens) in enumerate(iterator):
+	for i, x in enumerate(iterator):
 		if hri.training:
 			optimizer.zero_grad()
-		batch_size, seq_len, dims = x.shape
-		mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
-		x_p1_tdm = x[:,:,p1_tdm_idx].to(device)
-		x_r2_vae = x[:,:,r2_vae_idx].to(device)
+		x = x[0]
+		seq_len, dims = x.shape
+		x_p1_tdm = x[:,p1_tdm_idx].to(device)
+		x_r2_vae = x[:,r2_vae_idx].to(device)
 		with torch.no_grad():
-			_, _, d_x1_dist = human_tdm(torch.nn.utils.rnn.pack_padded_sequence(x_p1_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
-			z_r2vae_dist = robot_vae(x_r2_vae.to(device), True)
+			_, _, d_x1_dist = human_tdm(x_p1_tdm, None)
+			z_r2vae_dist = robot_vae(x_r2_vae, True)
 
-		x_r2_hri = torch.concat([x[:,:,r2_hri_idx].to(device), d_x1_dist.mean], dim=-1)
-		z_r2hri_dist, z_r2hri_samples = hri(torch.nn.utils.rnn.pack_padded_sequence(x_r2_hri.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
+		x_r2_hri = torch.concat([x[:,r2_hri_idx].to(device), d_x1_dist.mean], dim=-1)
+		z_r2hri_dist, z_r2hri_samples = hri(x_r2_hri, None)
 
 		x_r2vaehri_gen = robot_vae._output(robot_vae._decoder(z_r2hri_samples))
 		
-		recon_loss=  F.mse_loss(x_r2vaehri_gen,x_r2_vae,reduction='none')[mask].sum()
-		kl_loss = torch.distributions.kl_divergence(z_r2hri_dist, z_r2vae_dist)[mask].sum()
+		recon_loss=  F.mse_loss(x_r2vaehri_gen,x_r2_vae,reduction='none').sum()
+		kl_loss = torch.distributions.kl_divergence(z_r2hri_dist, z_r2vae_dist).sum()
 		loss = recon_loss + robot_vae.beta*kl_loss
 		total_loss.append(loss)
 		total_recon_loss.append(recon_loss)
@@ -55,7 +55,7 @@ def run_iters_hri(iterator, hri, robot_vae, human_tdm, optimizer):
 			optimizer.step()
 		iters += 1
 
-	return total_loss,total_recon_loss,total_kl_loss, x_r2vaehri_gen[mask].reshape(-1, robot_vae.window_size, robot_vae.num_joints, robot_vae.joint_dims), z_r2hri_samples[mask], z_r2vae_dist.sample()[mask], x_r2_vae[mask].reshape(-1, robot_vae.window_size, robot_vae.num_joints, robot_vae.joint_dims), iters
+	return total_loss,total_recon_loss,total_kl_loss, x_r2vaehri_gen.reshape(-1, robot_vae.window_size, robot_vae.num_joints, robot_vae.joint_dims), z_r2hri_samples, z_r2vae_dist.sample(), x_r2_vae.reshape(-1, robot_vae.window_size, robot_vae.num_joints, robot_vae.joint_dims), iters
 
 def write_summaries_hri(writer, loss, recon_loss, kl_loss, x_gen, x, z_r2hri_samples, z_r2vae_samples, steps_done, prefix):
 	writer.add_scalar(prefix+'/loss', sum(loss), steps_done)
@@ -134,7 +134,7 @@ if __name__=='__main__':
 	robot_vae_hyperparams = np.load(os.path.join(VAE_MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
 	robot_vae_args = robot_vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
 	robot_vae_config = robot_vae_hyperparams['vae_config'].item()
-	robot_vae = getattr(networks, robot_vae_args.model)(**(robot_vae_config.__dict__)).to(device)
+	robot_vae = networks.VAE(**(robot_vae_config.__dict__)).to(device)
 	ckpt = torch.load(args.robot_ckpt)
 	robot_vae.load_state_dict(ckpt['model'])
 	robot_vae.eval()
@@ -144,7 +144,7 @@ if __name__=='__main__':
 	human_tdm_config = human_tdm_hyperparams['tdm_config'].item()
 	human_tdm = networks.TDM(**(human_tdm_config.__dict__)).to(device)
 	ckpt = torch.load(args.human_ckpt)
-	human_tdm.load_state_dict(ckpt['model'])
+	human_tdm.load_state_dict(ckpt['model_1'])
 	human_tdm.eval()
 
 	print("Creating Model and Optimizer")
@@ -161,29 +161,31 @@ if __name__=='__main__':
 	# ckpt = torch.load(os.path.join(VAE_MODELS_FOLDER, 'final.pth'))
 
 	print("Reading Data")
-	train_data = [torch.Tensor(traj) for traj in dataloaders.buetepage_hr.SequenceWindowDataset(args.src, train=True, window_length=config.WINDOW_LEN).traj_data]
-	test_data = [torch.Tensor(traj) for traj in dataloaders.buetepage_hr.SequenceWindowDataset(args.src, train=False, window_length=config.WINDOW_LEN).traj_data]
-	# with np.load(args.src, allow_pickle=True) as data:
-		# train_data = [torch.Tensor(traj) for traj in data['train_data']]
-		# test_data = [torch.Tensor(traj) for traj in data['test_data']]
+	# train_data = [torch.Tensor(traj) for traj in dataloaders.buetepage_hr.SequenceWindowDataset(args.src, train=True, window_length=config.WINDOW_LEN).traj_data]
+	# test_data = [torch.Tensor(traj) for traj in dataloaders.buetepage_hr.SequenceWindowDataset(args.src, train=False, window_length=config.WINDOW_LEN).traj_data]
+	with np.load(args.src, allow_pickle=True) as data:
+		train_data = [torch.Tensor(traj) for traj in data['train_data']]
+		test_data = [torch.Tensor(traj) for traj in data['test_data']]
 
-	while len(train_data)<hri.batch_size:
-		train_data += train_data
+	# while len(train_data)<hri.batch_size:
+	# 	train_data += train_data
 		
-	train_num = len(train_data)
-	test_num = len(test_data)
-	sequences = train_data + test_data
-	lens = []
-	for traj in sequences:
-		lens.append(traj.shape[0])
+	# train_num = len(train_data)
+	# test_num = len(test_data)
+	# sequences = train_data + test_data
+	# lens = []
+	# for traj in sequences:
+	# 	lens.append(traj.shape[0])
 
-	padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=1.)
-	train_data = padded_sequences[:train_num]
-	train_lens = lens[:train_num]
-	test_data = padded_sequences[train_num:]
-	test_lens = lens[train_num:]
-	train_iterator = DataLoader(list(zip(train_data,train_lens)), batch_size=len(train_data), shuffle=True)
-	test_iterator = DataLoader(list(zip(test_data,test_lens)), batch_size=len(test_data), shuffle=True)
+	# padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=1.)
+	# train_data = padded_sequences[:train_num]
+	# train_lens = lens[:train_num]
+	# test_data = padded_sequences[train_num:]
+	# test_lens = lens[train_num:]
+	# train_iterator = DataLoader(list(zip(train_data,train_lens)), batch_size=len(train_data), shuffle=True)
+	# test_iterator = DataLoader(list(zip(test_data,test_lens)), batch_size=len(test_data), shuffle=True)
+	train_iterator = DataLoader(train_data, batch_size=1, shuffle=True)
+	test_iterator = DataLoader(test_data, batch_size=1, shuffle=True)
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
@@ -220,12 +222,12 @@ if __name__=='__main__':
 			if torch.allclose(param.grad, torch.zeros_like(param.grad)):
 				print('zero grad for',name)
 		
-		hri.eval()
-		with torch.no_grad():
-			test_loss, test_recon_loss, test_kl_loss, x_r2vaehri_gen, z_r2hri_samples, z_r2vae_samples, x, iters = run_iters_hri(test_iterator, hri, robot_vae, human_tdm, optimizer)
-			write_summaries_hri(writer, test_loss, test_recon_loss, test_kl_loss, x_r2vaehri_gen, x, z_r2hri_samples, z_r2vae_samples, steps_done, 'test')
-
 		if epoch % config.EPOCHS_TO_SAVE == 0:
+			hri.eval()
+			with torch.no_grad():
+				test_loss, test_recon_loss, test_kl_loss, x_r2vaehri_gen, z_r2hri_samples, z_r2vae_samples, x, iters = run_iters_hri(test_iterator, hri, robot_vae, human_tdm, optimizer)
+				write_summaries_hri(writer, test_loss, test_recon_loss, test_kl_loss, x_r2vaehri_gen, x, z_r2hri_samples, z_r2vae_samples, steps_done, 'test')
+
 			checkpoint_file = os.path.join(MODELS_FOLDER, 'tdm_%0.4d.pth'%(epoch))
 			torch.save({'model': hri.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, checkpoint_file)
 

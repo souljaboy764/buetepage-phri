@@ -7,10 +7,8 @@ import numpy as np
 import os, datetime, argparse
 
 import networks
-from config import global_config, human_vae_config, robot_vae_config
+from config import *
 from utils import *
-
-from mild_hri.dataloaders.buetepage import HHWindowDataset
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -44,19 +42,25 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
 	parser.add_argument('--results', type=str, default='./logs/debug', metavar='DST',
 						help='Path for saving results (default: ./logs/debug).')
-	parser.add_argument('--src', type=str, default='./data/2023/hh_20hz_3joints_xvel/vae_data.npz', metavar='SRC',
+	parser.add_argument('--src', type=str, default='./data/2023/pepper_20hz_3joints_xvel/vae_data.npz', metavar='SRC',
 						help='Path to read training and testing data (default: ./data/hh/vae_data.npz).') # ./data/hr/vae_data.npz for HRI
-	parser.add_argument('--model', type=str, default='VAE', metavar='TYPE', choices=['AE', 'VAE', "AE_HRI", "VAE_HRI"],
-						help='Which model to use (AE, VAE, AE_HRI, VAE_HRI) (default: VAE).')					
+	parser.add_argument('--model', type=str, default='VAE_PEPPER', metavar='TYPE', choices=['VAE_HH', "VAE_YUMI", "VAE_PEPPER"],
+						help='Which model to use (VAE_HH, VAE_YUMI or VAE_PEPPER) (default: VAE).')					
 	args = parser.parse_args()
-	torch.manual_seed(128542)
+	seed = np.random.randint(0,np.iinfo(np.int32).max)
+	torch.manual_seed(seed)
 	torch.autograd.set_detect_anomaly(True)
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-	is_hri = args.model.split('_')[-1]=='HRI'
-	args.model = args.model.split('_')[0]
+	is_hri = args.model.split('_')[1]!='HH'
 	config = global_config()
-	vae_config = robot_vae_config() if is_hri else human_vae_config()
+	if args.model == 'VAE_HH':
+		vae_config = human_vae_config()
+	elif args.model == 'VAE_YUMI':
+		vae_config = yumi_vae_config()
+	else:
+		vae_config = pepper_vae_config()
+
 
 	MODELS_FOLDER = os.path.join(args.results, "models")
 	SUMMARIES_FOLDER = os.path.join(args.results, "summary")
@@ -71,7 +75,7 @@ if __name__=='__main__':
 	np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, vae_config=vae_config)
 
 	print("Creating Model and Optimizer")
-	model = getattr(networks, args.model)(**(vae_config.__dict__)).to(device)
+	model = networks.VAE(**(vae_config.__dict__)).to(device)
 	optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
 
 	# if os.path.exists(os.path.join(MODELS_FOLDER, 'final.pth')):
@@ -85,11 +89,7 @@ if __name__=='__main__':
 	with np.load(args.src, allow_pickle=True) as data:
 		train_data = np.array(data['train_data']).astype(np.float32)
 		test_data = np.array(data['test_data']).astype(np.float32)
-		if is_hri:
-			# Training only the robot degrees of freedom
-			train_data = train_data[:, -model.input_dim:]
-			test_data = test_data[:, -model.input_dim:]
-		else:
+		if args.model == 'VAE_HH':
 			num_samples, dim = train_data.shape
 			train_p1 = train_data[:, :dim//2]
 			train_p2 = train_data[:, dim//2:]
@@ -97,6 +97,9 @@ if __name__=='__main__':
 			test_p2 = test_data[:, dim//2:]
 			train_data = np.vstack([train_p1, train_p2])
 			test_data = np.vstack([test_p1, test_p2])
+		else:
+			train_data = train_data[:, -model.input_dim:]
+			test_data = test_data[:, -model.input_dim:]
 
 		train_iterator = DataLoader(train_data, batch_size=model.batch_size, shuffle=True)
 		test_iterator = DataLoader(test_data, batch_size=model.batch_size, shuffle=True)
@@ -107,12 +110,13 @@ if __name__=='__main__':
 	s = ''
 	for k in config.__dict__:
 		s += str(k) + ' : ' + str(config.__dict__[k]) + '\n'
+	s += 'seed:'+str(seed)+'\n'
 	writer.add_text('global_config', s)
 
 	s = ''
 	for k in vae_config.__dict__:
 		s += str(k) + ' : ' + str(vae_config.__dict__[k]) + '\n'
-	writer.add_text('human_vae_config', s)
+	writer.add_text('vae_config', s)
 
 	writer.flush()
 
@@ -121,7 +125,7 @@ if __name__=='__main__':
 		model.train()
 		train_recon, train_kl, train_loss, x_gen, zx_samples, x, iters = run_iters_vae(train_iterator, model, optimizer)
 		steps_done = (epoch+1)*iters
-		write_summaries_vae(writer, train_recon, train_kl, train_loss, x_gen, zx_samples, x, steps_done, 'train')
+		write_summaries_vae(writer, train_recon, train_kl, train_loss, x_gen, zx_samples, x, steps_done, 'train_r' if is_hri else 'train')
 		params = []
 		grads = []
 		for name, param in model.named_parameters():
@@ -132,12 +136,12 @@ if __name__=='__main__':
 			if torch.allclose(param.grad, torch.zeros_like(param.grad)):
 				print('zero grad for',name)
 		
-		model.eval()
-		with torch.no_grad():
-			test_recon, test_kl, test_loss, x_gen, zx_samples, x, iters = run_iters_vae(test_iterator, model, optimizer)
-			write_summaries_vae(writer, test_recon, test_kl, test_loss, x_gen, zx_samples, x, steps_done, 'test')
-
 		if epoch % config.EPOCHS_TO_SAVE == 0:
+			model.eval()
+			with torch.no_grad():
+				test_recon, test_kl, test_loss, x_gen, zx_samples, x, iters = run_iters_vae(test_iterator, model, optimizer)
+				write_summaries_vae(writer, test_recon, test_kl, test_loss, x_gen, zx_samples, x, steps_done, 'test_r' if is_hri else 'test')
+
 			checkpoint_file = os.path.join(MODELS_FOLDER, '%0.4d.pth'%(epoch))
 			torch.save({'model': model.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, checkpoint_file)
 

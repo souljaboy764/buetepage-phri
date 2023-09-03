@@ -22,7 +22,7 @@ p1_vae_idx = np.arange(90)
 p2_vae_idx = np.arange(90) + 90
 
 
-def downsample_trajs(train_data, train_labels, downsample_len):
+def downsample_trajs(train_data, downsample_len):
 	theta = torch.Tensor(np.array([[[1,0,0.], [0,1,0]]])).to(device).repeat(train_data[0].shape[1],1,1)
 	num_trajs = len(train_data)
 	for i in range(num_trajs):
@@ -35,11 +35,7 @@ def downsample_trajs(train_data, train_labels, downsample_len):
 		train_data[i] = grid_sample(train_data[i].type(torch.float32), grid, align_corners=True) # 4, 3, 2 downsample_len
 		train_data[i] = train_data[i][:, :, 0].cpu().detach().numpy() # 4, 3, downsample_len
 		train_data[i] = train_data[i].transpose(2,0,1) # downsample_len, 4, 3
-		print(old_shape,train_data[i].shape)
-
-	print('Augmented Sequences: Training', train_data.shape)
-	print('Augmented Labels: Training', train_labels.shape)
-	return train_data, train_labels
+	return train_data
 
 def MMD(x, y, reduction='mean'):
 	"""Emprical maximum mean discrepancy with rbf kernel. The lower the result
