@@ -61,14 +61,7 @@ print("Reading Data")
 with np.load(args.src, allow_pickle=True) as data:
 	test_data_np = data['test_data']
 	test_data = [torch.Tensor(traj) for traj in test_data_np]
-	test_num = len(test_data)
-	print(test_num,'Testing Trajecotries')
-	lens = []
-	for traj in test_data:
-		lens.append(traj.shape[0])
 
-	# padded_sequences = pad_sequence(test_data, batch_first=True, padding_value=1.)
-	# test_iterator = DataLoader(test_data, batch_size=1, shuffle=False)
 # p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
 # p2_tdm_idx = np.concatenate([480+np.arange(12),np.arange(-5,0)])
 # p1_vae_idx = np.arange(480)
@@ -81,11 +74,6 @@ p2_vae_idx = np.arange(90) + 90
 actidx = np.array([[0,7],[7,15],[15,29],[29,39]])
 
 print("Starting Evaluation")
-total_loss_1 = []
-total_loss_2 = []
-x1_vae_gen = []
-x2_vae_gen = []
-x_tdm_gen = []
 mse_actions = []
 
 print('Pred. MSE (all)\t\tPred. MSE w/o waving\t\tPred. MSE waving\t\tPred. MSE handshake\t\tPred. MSE rocket\t\tPred. MSE parachute')

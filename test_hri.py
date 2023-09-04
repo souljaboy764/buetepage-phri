@@ -27,8 +27,6 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DEFAULT_RESULTS_FOLDER = os.path.join(os.path.dirname(os.path.dirname(args.robot_ckpt)))
 VAE_MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
 MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, 'dynamics', "models")
-os.makedirs(MODELS_FOLDER,exist_ok=True)
-SUMMARIES_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, 'dynamics', "summary")
 global_step = 0
 if not os.path.exists(DEFAULT_RESULTS_FOLDER) and os.path.exists(os.path.join(VAE_MODELS_FOLDER, 'final.pth')):
 	print('Please use the same directory as the final VAE model')
@@ -64,28 +62,6 @@ ckpt = torch.load(os.path.join(MODELS_FOLDER, 'tdm_final.pth'))
 hri.load_state_dict(ckpt['model'])
 hri.eval()
 
-# print("Reading Data")
-# with np.load(args.src, allow_pickle=True) as data:
-	
-# 	test_data_np = data['test_data']
-# 	test_data = [torch.Tensor(traj) for traj in test_data_np]
-# 	test_num = len(test_data)
-# 	lens = []
-# 	for traj in test_data:
-# 		lens.append(traj.shape[0])
-
-# 	padded_sequences = pad_sequence(test_data, batch_first=True, padding_value=1.)
-# 	test_iterator = DataLoader(list(zip(padded_sequences, lens)), batch_size=len(test_data), shuffle=False)
-# print("Reading Data")
-# test_data = [torch.Tensor(traj) for traj in dataloaders.buetepage_hr.SequenceWindowDataset(args.src, train=False, window_length=config.WINDOW_LEN).traj_data]
-# test_num = len(test_data)
-# lens = []
-# for traj in test_data:
-# 	lens.append(traj.shape[0])
-
-# padded_sequences = pad_sequence(test_data, batch_first=True, padding_value=1.)
-# test_iterator = DataLoader(list(zip(padded_sequences,lens)), batch_size=len(padded_sequences), shuffle=True)
-
 print("Reading Data")
 with np.load(args.src, allow_pickle=True) as data:
 	test_data = [torch.Tensor(traj) for traj in data['test_data']]
@@ -98,33 +74,37 @@ with np.load(args.src, allow_pickle=True) as data:
 p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-5,0)])
 r2_hri_idx = np.concatenate([90+np.arange(4),np.arange(-5,0)])
 r2_vae_idx = 90 + np.arange(20)
+actidx = np.array([[0,7],[7,15],[15,29],[29,39]])
 
 print("Starting Evaluation")
-total_loss = []
-x_gen = []
-for i, x in enumerate(test_iterator):
-	x = x[0]
-	seq_len, dims = x.shape
-	x_p1_tdm = x[:,p1_tdm_idx].to(device)
-	x_r2_gt = x[:,r2_vae_idx].to(device)
-	x_r2_hri = x[:,r2_hri_idx].to(device)
-	with torch.no_grad():
-		_, _, d_x1_dist = human_tdm(x_p1_tdm, None)
-		hri_input = torch.concat([x_r2_hri, d_x1_dist.mean], dim=-1)
-		z_r2hri_dist, z_r2hri_samples = hri(hri_input, None)
-		x_r2_gen = robot_vae._output(robot_vae._decoder(z_r2hri_dist.mean))
-				
-	loss = F.mse_loss(x_r2_gt, x_r2_gen, reduction='none')
-	total_loss.append(loss.detach().cpu().numpy())
-	x_gen.append(x_r2_gen.detach().cpu().numpy())
+mse_actions = []
 
-total_loss = np.concatenate(total_loss,axis=0)
-print(total_loss.shape)
-np.savez_compressed(os.path.join(DEFAULT_RESULTS_FOLDER,'recon_error.npz'), error=total_loss, lens=lens)
-# x_gen = np.concatenate(x_gen,axis=0)
-x_gen = np.array(x_gen)
-print(total_loss.mean())
-print(np.shape(x_gen))
-print(np.shape(padded_sequences.cpu().detach().numpy()))
-print(os.path.join(DEFAULT_RESULTS_FOLDER,'hri_test.npz'))
-np.savez_compressed(os.path.join(DEFAULT_RESULTS_FOLDER,'hri_test.npz'), x_gen=x_gen, test_data=padded_sequences.cpu().detach().numpy(), lens=lens)
+print('Pred. MSE (all)\t\tPred. MSE w/o waving\t\tPred. MSE waving\t\tPred. MSE handshake\t\tPred. MSE rocket\t\tPred. MSE parachute')
+print('mean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma')
+
+for a in actidx:
+	mse_actions.append([])
+	for i in range(a[0],a[1]):
+		x = test_data[i]
+		seq_len, dims = x.shape
+		x_p1_tdm = x[:,p1_tdm_idx].to(device)
+		x_r2_gt = x[:,r2_vae_idx].to(device)
+		x_r2_hri = x[:,r2_hri_idx].to(device)
+		with torch.no_grad():
+			_, _, d_x1_dist = human_tdm(x_p1_tdm, None)
+			hri_input = torch.concat([x_r2_hri, d_x1_dist.mean], dim=-1)
+			z_r2hri_dist, z_r2hri_samples = hri(hri_input, None)
+			x_r2_gen = robot_vae._output(robot_vae._decoder(z_r2hri_dist.mean))
+
+		mse_actions[-1] += ((x_r2_gt - x_r2_gen)**2).reshape((seq_len, robot_vae.window_size, robot_vae.num_joints, robot_vae.joint_dims)).sum(-1).mean(-1).mean(-1).detach().cpu().numpy().tolist()
+
+pred_mse_ckpt = []
+pred_mse_nowave_ckpt = []
+for mse in mse_actions:
+	pred_mse_ckpt+= mse
+for mse in mse_actions[1:]:
+	pred_mse_nowave_ckpt+= mse
+s = f'{np.mean(pred_mse_ckpt):.4e}\t{np.std(pred_mse_ckpt):.4e}\t{np.mean(pred_mse_nowave_ckpt):.4e}\t{np.std(pred_mse_nowave_ckpt):.4e}'
+for mse in mse_actions:
+	s += f'\t{np.mean(mse):.4e}\t{np.std(mse):.4e}'
+print(s)
