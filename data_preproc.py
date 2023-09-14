@@ -70,12 +70,12 @@ def preproc(src_dir, robot='', downsample=1):
 			for i in range(len(segments)):
 				s = segments[i]
 				traj1 = data_p1[s[0]:s[1], idx_list] # seq_len, 3 ,3
-				vel1 = np.diff(traj1, axis=0, prepend=traj1[0:1])
 				traj1 = traj1 - traj1[0,0]
 				if downsample==1:
 					traj1 = np.concatenate([traj1, vel1], axis=-1)
 				else:
 					traj1 = downsample_trajs([np.concatenate([traj1, vel1], axis=-1)], downsample)[0]
+				vel1 = np.diff(traj1, axis=0, prepend=traj1[0:1])
 				# the indices where no movement occurs at the end are annotated as "not active". (Sec. 4.3.1 of the paper)
 				notactive_idx = np.where(np.sqrt(np.power(np.diff(traj1, axis=0),2).sum((2))).mean(1) > 1e-3)[0]
 				labels = np.zeros((traj1.shape[0],5))

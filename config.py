@@ -3,7 +3,7 @@ class global_config:
 		self.NUM_JOINTS = 3
 		self.JOINTS_DIM = 6
 		self.WINDOW_LEN = 5
-		self.NUM_ACTIONS = 5
+		self.NUM_ACTIONS = 4
 		self.optimizer = 'AdamW'
 		self.lr = 5e-4
 		self.EPOCHS = 400

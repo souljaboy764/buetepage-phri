@@ -21,15 +21,19 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 	total_kl_1 = []
 	total_kl_2 = []
 	total_loss = []
-	for i, (x, lens) in enumerate(iterator):
+	for i, (x, label) in enumerate(iterator):
 		if tdm_1.training:
 			optimizer.zero_grad()
-		seq_len, dims = x[0].shape
+
+		x = torch.Tensor(x[0])
+		label = torch.Tensor(label[0])
+		x = torch.cat([x,label], dim=-1)
+		seq_len, dims = x.shape
 		# mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
-		x1_tdm = x[0][:,p1_tdm_idx]
-		x2_tdm = x[0][:,p2_tdm_idx]
-		x1_vae = x[0][:,p1_vae_idx]
-		x2_vae = x[0][:,p2_vae_idx]
+		x1_tdm = x[:,p1_tdm_idx]
+		x2_tdm = x[:,p2_tdm_idx]
+		x1_vae = x[:,p1_vae_idx]
+		x2_vae = x[:,p2_vae_idx]
 
 		# zd1_dist, d1_samples, d1_dist = tdm_1(torch.nn.utils.rnn.pack_padded_sequence(x1_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
 		# zd2_dist, d2_samples, d2_dist = tdm_2(torch.nn.utils.rnn.pack_padded_sequence(x2_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
@@ -101,13 +105,13 @@ if __name__=='__main__':
 		print('Please use the same directory as the final VAE model')
 		exit(-1)
 
-	if os.path.exists(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz')):
-		hyperparams = np.load(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz'), allow_pickle=True)
-		args = hyperparams['args'].item() # overwrite args if loading from checkpoint
-		config = hyperparams['global_config'].item()
-		tdm_config = hyperparams['tdm_config'].item()
-	else:
-		np.savez_compressed(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz'), args=args, global_config=config, tdm_config=tdm_config)
+	# if os.path.exists(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz')):
+	# 	hyperparams = np.load(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz'), allow_pickle=True)
+	# 	args = hyperparams['args'].item() # overwrite args if loading from checkpoint
+	# 	config = hyperparams['global_config'].item()
+	# 	tdm_config = hyperparams['tdm_config'].item()
+	# else:
+	np.savez_compressed(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz'), args=args, global_config=config, tdm_config=tdm_config)
 
 	vae_hyperparams = np.load(os.path.join(VAE_MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
 	vae_args = vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
@@ -118,42 +122,47 @@ if __name__=='__main__':
 	tdm_2 = networks.TDM(**(tdm_config.__dict__)).to(device)
 	optimizer = getattr(torch.optim, config.optimizer)(list(tdm_1.parameters()) + list(tdm_2.parameters()), lr=config.lr)
 
-	if os.path.exists(os.path.join(MODELS_FOLDER, 'tdm_final.pth')):
-		print("Loading Checkpoints")
-		ckpt = torch.load(os.path.join(MODELS_FOLDER, 'tdm_final.pth'))
-		tdm_1.load_state_dict(ckpt['model_1'])
-		tdm_2.load_state_dict(ckpt['model_2'])
-		optimizer.load_state_dict(ckpt['optimizer'])
-		global_step = ckpt['epoch']
+	# if os.path.exists(os.path.join(MODELS_FOLDER, 'tdm_final.pth')):
+	# 	print("Loading Checkpoints")
+	# 	ckpt = torch.load(os.path.join(MODELS_FOLDER, 'tdm_final.pth'))
+	# 	tdm_1.load_state_dict(ckpt['model_1'])
+	# 	tdm_2.load_state_dict(ckpt['model_2'])
+	# 	optimizer.load_state_dict(ckpt['optimizer'])
+	# 	global_step = ckpt['epoch']
 
-	vae = getattr(networks, vae_args.model)(**(vae_config.__dict__)).to(device)
+	vae = networks.VAE(**(vae_config.__dict__)).to(device)
 	# ckpt = torch.load(os.path.join(VAE_MODELS_FOLDER, 'final.pth'))
 	ckpt = torch.load(args.vae_ckpt)
 	vae.load_state_dict(ckpt['model'])
 	vae.eval()
 
 	print("Reading Data")
-	with np.load(args.src, allow_pickle=True) as data:
-		train_data = [torch.Tensor(traj) for traj in data['train_data']]
-		test_data = [torch.Tensor(traj) for traj in data['test_data']]
+	# with np.load(args.src, allow_pickle=True) as data:
+	# 	train_data = [torch.Tensor(traj) for traj in data['train_data']]
+	# 	test_data = [torch.Tensor(traj) for traj in data['test_data']]
 
-		while len(train_data)<tdm_1.batch_size:
-			train_data += train_data
+	# 	while len(train_data)<tdm_1.batch_size:
+	# 		train_data += train_data
 			
-		train_num = len(train_data)
-		test_num = len(test_data)
-		sequences = train_data + test_data
-		lens = []
-		for traj in sequences:
-			lens.append(traj.shape[0])
+	# 	train_num = len(train_data)
+	# 	test_num = len(test_data)
+	# 	sequences = train_data + test_data
+	# 	lens = []
+	# 	for traj in sequences:
+	# 		lens.append(traj.shape[0])
 
-		# padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=0.)
-		train_data = sequences[:train_num]
-		train_lens = lens[:train_num]
-		test_data = sequences[train_num:]
-		test_lens = lens[train_num:]
-		train_iterator = DataLoader(list(zip(train_data,train_lens)), batch_size=1, shuffle=True)
-		test_iterator = DataLoader(list(zip(test_data,test_lens)), batch_size=1, shuffle=True)
+	# 	# padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=0.)
+	# 	train_data = sequences[:train_num]
+	# 	train_lens = lens[:train_num]
+	# 	test_data = sequences[train_num:]
+	# 	test_lens = lens[train_num:]
+	# 	train_iterator = DataLoader(list(zip(train_data,train_lens)), batch_size=1, shuffle=True)
+	# 	test_iterator = DataLoader(list(zip(test_data,test_lens)), batch_size=1, shuffle=True)
+	from mild_hri.dataloaders import *
+	dataset = buetepage.HHWindowDataset
+	
+	train_iterator = DataLoader(dataset(vae_args.src, train=True, window_length=config.WINDOW_LEN, downsample=0.2), batch_size=1, shuffle=True)
+	test_iterator = DataLoader(dataset(vae_args.src, train=False, window_length=config.WINDOW_LEN, downsample=0.2), batch_size=1, shuffle=False)
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)

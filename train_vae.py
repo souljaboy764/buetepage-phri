@@ -42,9 +42,9 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
 	parser.add_argument('--results', type=str, default='./logs/debug', metavar='DST',
 						help='Path for saving results (default: ./logs/debug).')
-	parser.add_argument('--src', type=str, default='./data/2023/pepper_20hz_3joints_xvel/vae_data.npz', metavar='SRC',
+	parser.add_argument('--src', type=str, default='/home/vignesh/playground/mild_hri/data/nuisi/traj_data.npz', metavar='SRC',
 						help='Path to read training and testing data (default: ./data/hh/vae_data.npz).') # ./data/hr/vae_data.npz for HRI
-	parser.add_argument('--model', type=str, default='VAE_PEPPER', metavar='TYPE', choices=['VAE_HH', "VAE_YUMI", "VAE_PEPPER"],
+	parser.add_argument('--model', type=str, default='VAE_HH', metavar='TYPE', choices=['VAE_HH', "VAE_YUMI", "VAE_PEPPER"],
 						help='Which model to use (VAE_HH, VAE_YUMI or VAE_PEPPER) (default: VAE).')					
 	args = parser.parse_args()
 	seed = np.random.randint(0,np.iinfo(np.int32).max)
@@ -86,23 +86,42 @@ if __name__=='__main__':
 	# 	global_step = ckpt['epoch']
 
 	print("Reading Data")
-	with np.load(args.src, allow_pickle=True) as data:
-		train_data = np.array(data['train_data']).astype(np.float32)
-		test_data = np.array(data['test_data']).astype(np.float32)
-		if args.model == 'VAE_HH':
-			num_samples, dim = train_data.shape
-			train_p1 = train_data[:, :dim//2]
-			train_p2 = train_data[:, dim//2:]
-			test_p1 = test_data[:, :dim//2]
-			test_p2 = test_data[:, dim//2:]
-			train_data = np.vstack([train_p1, train_p2])
-			test_data = np.vstack([test_p1, test_p2])
-		else:
-			train_data = train_data[:, -model.input_dim:]
-			test_data = test_data[:, -model.input_dim:]
+	# with np.load(args.src, allow_pickle=True) as data:
+	# 	train_data = np.array(data['train_data']).astype(np.float32)
+	# 	test_data = np.array(data['test_data']).astype(np.float32)
+	# 	if args.model == 'VAE_HH':
+	# 		num_samples, dim = train_data.shape
+	# 		train_p1 = train_data[:, :dim//2]
+	# 		train_p2 = train_data[:, dim//2:]
+	# 		test_p1 = test_data[:, :dim//2]
+	# 		test_p2 = test_data[:, dim//2:]
+	# 		train_data = np.vstack([train_p1, train_p2])
+	# 		test_data = np.vstack([test_p1, test_p2])
+	# 	else:
+	# 		train_data = train_data[:, -model.input_dim:]
+	# 		test_data = test_data[:, -model.input_dim:]
+	from mild_hri.dataloaders import *
+	if args.model =='VAE_HH':
+		dataset = buetepage.HHWindowDataset
+	elif args.model =='VAE_PEPPER':
+		dataset = buetepage.PepperWindowDataset
+	elif args.model =='VAE_YUMI':
+		dataset = buetepage_hr.YumiWindowDataset
+	
+	train_dataset = dataset(args.src, train=True, window_length=config.WINDOW_LEN, downsample=0.2)
+	test_dataset = dataset(args.src, train=False, window_length=config.WINDOW_LEN, downsample=0.2)
 
-		train_iterator = DataLoader(train_data, batch_size=model.batch_size, shuffle=True)
-		test_iterator = DataLoader(test_data, batch_size=model.batch_size, shuffle=True)
+	train_data = np.concatenate(train_dataset.traj_data).astype(np.float32)
+	test_data = np.concatenate(test_dataset.traj_data).astype(np.float32)
+	if args.model =='VAE_HH':
+		train_data = np.concatenate([train_data[:, :model.input_dim], train_data[:, model.input_dim:]])
+		test_data = np.concatenate([test_data[:, :model.input_dim], test_data[:, model.input_dim:]])
+	else:
+		train_data = train_data[:, -model.input_dim:]
+		test_data = test_data[:, -model.input_dim:]
+
+	train_iterator = DataLoader(train_data, batch_size=model.batch_size, shuffle=True)
+	test_iterator = DataLoader(test_data, batch_size=model.batch_size, shuffle=True)
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
