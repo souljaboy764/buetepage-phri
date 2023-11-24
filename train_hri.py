@@ -17,8 +17,10 @@ import networks
 from config import *
 from utils import *
 
+from mild_hri.dataloaders import *
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-def run_iters_hri(iterator, hri, robot_vae, human_tdm, optimizer):
+def run_iters_hri(iterator:DataLoader, hri:networks.HRIDynamics, robot_vae:networks.VAE, human_tdm:networks.TDM, optimizer:torch.optim.Optimizer):
 	iters = 0
 	total_loss = []
 	total_recon_loss = []
@@ -33,15 +35,15 @@ def run_iters_hri(iterator, hri, robot_vae, human_tdm, optimizer):
 		x_p1_tdm = x[:,p1_tdm_idx].to(device)
 		x_r2_vae = x[:,r2_vae_idx].to(device)
 		with torch.no_grad():
-			_, _, d_x1_dist = human_tdm(x_p1_tdm, None)
+			_, _, d_x1_dist, _ = human_tdm(x_p1_tdm, None)
 			z_r2vae_dist = robot_vae(x_r2_vae, True)
 
 		x_r2_hri = torch.concat([x[:,r2_hri_idx].to(device), d_x1_dist.mean], dim=-1)
-		z_r2hri_dist, z_r2hri_samples = hri(x_r2_hri, None)
+		z_r2hri_dist, z_r2hri_samples, _ = hri(x_r2_hri, None)
 
 		x_r2vaehri_gen = robot_vae._output(robot_vae._decoder(z_r2hri_samples))
 		
-		recon_loss=  F.mse_loss(x_r2vaehri_gen,x_r2_vae,reduction='none').sum()
+		recon_loss =  F.mse_loss(x_r2vaehri_gen,x_r2_vae,reduction='none').sum()
 		kl_loss = torch.distributions.kl_divergence(z_r2hri_dist, z_r2vae_dist).sum()
 		loss = recon_loss + robot_vae.beta*kl_loss
 		total_loss.append(loss)
@@ -64,46 +66,12 @@ def write_summaries_hri(writer, loss, recon_loss, kl_loss, x_gen, x, z_r2hri_sam
 	writer.add_histogram(prefix+'latents/z_r2vae_samples', z_r2hri_samples.mean(0), steps_done)
 	writer.add_histogram(prefix+'latents/z_r2vae_samples', z_r2vae_samples.mean(0), steps_done)
 
-	# writer.add_embedding(d, metadata=d_labels, global_step=steps_done, tag=prefix+'/q(d|z)')
-	batch_size, window_size, num_joints, joint_dims = x_gen.shape
-	idx = np.random.randint(0,batch_size,5)
-	x_gen = x_gen[idx]
-	x = x[idx]
-	
-	fig, ax = plt.subplots(nrows=5, ncols=num_joints, figsize=(28, 16), sharex=True, sharey=True)
-	fig.tight_layout(pad=0, h_pad=0, w_pad=0)
-
-	plt.subplots_adjust(
-		left=0.05,  # the left side of the subplots of the figure
-		right=0.95,  # the right side of the subplots of the figure
-		bottom=0.05,  # the bottom of the subplots of the figure
-		top=0.95,  # the top of the subplots of the figure
-		wspace=0.05,  # the amount of width reserved for blank space between subplots
-		hspace=0.05,  # the amount of height reserved for white space between subplots
-	)
-	x = x.cpu().detach().numpy()
-	x_gen = x_gen.cpu().detach().numpy()
-	for i in range(5):
-		for j in range(num_joints):
-			ax[i][j].set(xlim=(0, window_size - 1))
-			color_counter = 0
-			for dim in range(joint_dims):
-				ax[i][j].plot(x[i, :, j, dim], color=colors_10(color_counter%10))
-				ax[i][j].plot(x_gen[i, :, j, dim], linestyle='--', color=colors_10(color_counter % 10))
-				color_counter += 1
-
-	fig.canvas.draw()
-	writer.add_figure(prefix+'sample reconstruction', fig, steps_done)
-	plt.close(fig)
-
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Training Human-Robot Interactive Dynamics')
 	parser.add_argument('--human-ckpt', type=str, metavar='HUMAN-CKPT', default='logs/vae_hh_orig_oldcommit_AdamW_07011535_tdmfixed/tdm/models/tdm_final.pth',
 						help='Path to the Human TDM checkpoint.')
 	parser.add_argument('--robot-ckpt', type=str, metavar='ROBOT-CKPT', default='logs/vae_hr_AdamW_07031331/models/final.pth',
 						help='Path to the robot VAE checkpoint, where the TDM models will also be saved.')
-	parser.add_argument('--src', type=str, default='./data/orig_hr/labelled_sequences.npz', metavar='DATA',
-						help='Path to read training and testing data (default: ./data/orig_hr/labelled_sequences.npz).')
 	args = parser.parse_args()
 	torch.manual_seed(128542)
 	torch.autograd.set_detect_anomaly(True)
@@ -119,13 +87,6 @@ if __name__=='__main__':
 	if not os.path.exists(DEFAULT_RESULTS_FOLDER) and os.path.exists(os.path.join(VAE_MODELS_FOLDER, 'final.pth')):
 		print('Please use the same directory as the final VAE model')
 		exit(-1)
-
-	# if os.path.exists(os.path.join(MODELS_FOLDER,'hri_hyperparams.npz')):
-	# 	hyperparams = np.load(os.path.join(MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
-	# 	args = hyperparams['args'].item() # overwrite args if loading from checkpoint
-	# 	config = hyperparams['global_config'].item()
-	# 	tdm_config = hyperparams['tdm_config'].item()
-	# else:
 
 	robot_vae_hyperparams = np.load(os.path.join(VAE_MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
 	robot_vae_args = robot_vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
@@ -143,44 +104,10 @@ if __name__=='__main__':
 	human_tdm.load_state_dict(ckpt['model_1'])
 	human_tdm.eval()
 
-	# if os.path.exists(os.path.join(MODELS_FOLDER, 'tdm_final.pth')):
-	# 	print("Loading Checkpoints")
-	# 	ckpt = torch.load(os.path.join(MODELS_FOLDER, 'tdm_final.pth'))
-	# 	tdm.load_state_dict(ckpt['model'])
-	# 	optimizer.load_state_dict(ckpt['optimizer'])
-	# 	global_step = ckpt['epoch']
-
-	# ckpt = torch.load(os.path.join(VAE_MODELS_FOLDER, 'final.pth'))
 	config = global_config()
 	hri_config = hri_config()
 
 	print("Reading Data")
-	# train_data = [torch.Tensor(traj) for traj in dataloaders.buetepage_hr.SequenceWindowDataset(args.src, train=True, window_length=config.WINDOW_LEN).traj_data]
-	# test_data = [torch.Tensor(traj) for traj in dataloaders.buetepage_hr.SequenceWindowDataset(args.src, train=False, window_length=config.WINDOW_LEN).traj_data]
-	# with np.load(args.src, allow_pickle=True) as data:
-	# 	train_data = [torch.Tensor(traj) for traj in data['train_data']]
-	# 	test_data = [torch.Tensor(traj) for traj in data['test_data']]
-	# while len(train_data)<hri.batch_size:
-	# 	train_data += train_data
-		
-	# train_num = len(train_data)
-	# test_num = len(test_data)
-	# sequences = train_data + test_data
-	# lens = []
-	# for traj in sequences:
-	# 	lens.append(traj.shape[0])
-
-	# padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=1.)
-	# train_data = padded_sequences[:train_num]
-	# train_lens = lens[:train_num]
-	# test_data = padded_sequences[train_num:]
-	# test_lens = lens[train_num:]
-	# train_iterator = DataLoader(list(zip(train_data,train_lens)), batch_size=len(train_data), shuffle=True)
-	# test_iterator = DataLoader(list(zip(test_data,test_lens)), batch_size=len(test_data), shuffle=True)
-	# train_iterator = DataLoader(train_data, batch_size=1, shuffle=True)
-	# test_iterator = DataLoader(test_data, batch_size=1, shuffle=True)
-
-	from mild_hri.dataloaders import *
 	if robot_vae_args.model =='VAE_PEPPER':
 		dataset = nuisi.PepperWindowDataset
 		hri_config.num_joints = 4
@@ -198,9 +125,6 @@ if __name__=='__main__':
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
-	# tdm.eval()
-	# writer.add_graph(model, torch.Tensor(test_data[:10]).to(device))
-	# tdm.train()
 	s = ''
 	for k in config.__dict__:
 		s += str(k) + ' : ' + str(config.__dict__[k]) + '\n'
@@ -216,7 +140,6 @@ if __name__=='__main__':
 	print("Starting Epochs")
 	for epoch in range(config.EPOCHS):
 		hri.train()
-		# packed_sequences = pack_padded_sequence(padded_sequences, lens, batch_first=True, enforce_sorted=False)
 		train_loss, train_recon_loss, train_kl_loss, x_r2vaehri_gen, z_r2hri_samples, z_r2vae_samples, x, iters = run_iters_hri(train_iterator, hri, robot_vae, human_tdm, optimizer)
 		steps_done = (epoch+1)*iters
 		write_summaries_hri(writer, train_loss, train_recon_loss, train_kl_loss, x_r2vaehri_gen, x, z_r2hri_samples, z_r2vae_samples, steps_done, 'train')
@@ -225,7 +148,6 @@ if __name__=='__main__':
 				continue
 			value = param.reshape(-1)
 			grad = param.grad.reshape(-1)
-			# name=name.replace('.','/')
 			writer.add_histogram('grads/'+name, param.grad.reshape(-1), steps_done)
 			writer.add_histogram('param/'+name, param.reshape(-1), steps_done)
 			if torch.allclose(param.grad, torch.zeros_like(param.grad)):

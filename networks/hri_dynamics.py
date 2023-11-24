@@ -28,12 +28,12 @@ class HRIDynamics(nn.Module):
 		# Not mentioned in the paper what is used to ensure stddev>0, using softplus for now
 		self.latent_std = nn.Sequential(nn.Linear(self.linear_hidden, self.latent_dim), nn.Softplus())
 
-	def forward(self, x, seq_len):
-		enc,_ = self._encoder_lstm(x)
+	def forward(self, x, lstm_state):
+		enc, lstm_state = self._encoder_lstm(x, lstm_state)
 		# enc, _ = pad_packed_sequence(enc, batch_first=True, total_length=seq_len)
 		enc = self._encoder_linear(enc)
 
 		z_dist = Normal(self.latent_mean(enc), self.latent_std(enc)+1e-4)
 		z_samples = z_dist.rsample()
 
-		return z_dist, z_samples
+		return z_dist, z_samples, lstm_state

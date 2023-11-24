@@ -22,8 +22,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 pred_mse = []
 pred_mse_nowave = []
 pred_mse_actions = [[],[],[],[]]
-print('Trial\tPred. MSE (all)\t\tPred. MSE w/o waving\t\tPred. MSE waving\t\tPred. MSE handshake\t\tPred. MSE rocket\t\tPred. MSE parachute')
-print('\tmean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma')
+best_action_mse = [1000,1000,1000,1000]
+print('Pred. MSE waving\t\tPred. MSE handshake\t\tPred. MSE rocket\t\tPred. MSE parachute')
+print('mean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma')
 for trial in range(4):
 	vae_model_folder = os.path.join(args.vae_ckpt, f'trial{trial}', "models")
 	vae_ckpt = os.path.join(vae_model_folder, 'final.pth')
@@ -71,7 +72,7 @@ for trial in range(4):
 	# 	test_data = [torch.Tensor(traj) for traj in test_data_np]
 
 	from mild_hri.dataloaders import *
-	dataset = nuisi.HHWindowDataset
+	dataset = alap.HHWindowDataset
 	test_dataset = dataset(vae_args.src, train=False, window_length=vae_config.window_size, downsample=0.2)
 	# print(len(test_dataset.traj_data), len(test_dataset.labels))
 	# actidx = np.array([[0,7],[7,15],[15,29],[29,39]])
@@ -103,18 +104,22 @@ for trial in range(4):
 		pred_mse_ckpt+= mse
 	for mse in pred_mse_actions_ckpt[1:]:
 		pred_mse_nowave_ckpt+= mse
-	s = f'{trial}'#\t{np.mean(pred_mse_ckpt):.4e}\t{np.std(pred_mse_ckpt):.4e}\t{np.mean(pred_mse_nowave_ckpt):.4e}\t{np.std(pred_mse_nowave_ckpt):.4e}'
-	for mse in pred_mse_actions_ckpt:
-		s += f'\t{np.mean(mse)*100:.3f} $\pm$ {np.std(mse)*100:.3f}'
-	print(s)
+	# s = f'{trial}'#\t{np.mean(pred_mse_ckpt):.4e}\t{np.std(pred_mse_ckpt):.4e}\t{np.mean(pred_mse_nowave_ckpt):.4e}\t{np.std(pred_mse_nowave_ckpt):.4e}'
+	# for mse in pred_mse_actions_ckpt:
+	# 	s += f'\t{np.mean(mse)*100:.3f} $\pm$ {np.std(mse)*100:.3f}'
+	# print(s)
 
 	pred_mse += pred_mse_ckpt
 	pred_mse_nowave += pred_mse_nowave_ckpt
-	for i in range(4):
-		pred_mse_actions[i] += pred_mse_actions_ckpt[i]
+	for i in range(len(pred_mse_actions_ckpt)):
+		if best_action_mse[i] > np.mean(pred_mse_actions_ckpt[i]):
+			best_action_mse[i] = np.mean(pred_mse_actions_ckpt[i])
+			pred_mse_actions[i] = pred_mse_actions_ckpt[i]
 
-# s = f'all\t{np.mean(pred_mse):.4e}\t{np.std(pred_mse):.4e}\t{np.mean(pred_mse_nowave):.4e}\t{np.std(pred_mse_nowave):.4e}'
-# for mse in pred_mse_actions:
-# 	s += f'\t{np.mean(mse):.4e}\t{np.std(mse):.4e}'
-# print(s)
-np.savez_compressed('logs/mse/nuisihh_3joints_xvel.npz', np.array(pred_mse_actions, dtype=object))
+s = ''
+for mse in pred_mse_actions:
+	if len(mse) ==0:
+		continue
+	s += f'\t{np.mean(mse)*100:.3f} $\pm$ {np.std(mse)*100:.3f}'
+print(s)
+np.savez_compressed('logs/mse/hh_20hz_3joints_xvel.npz', np.array(pred_mse_actions, dtype=object))

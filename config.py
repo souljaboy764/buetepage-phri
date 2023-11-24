@@ -23,6 +23,21 @@ class human_vae_config:
 		self.z_prior_mean = 0
 		self.z_prior_std = 1
 
+class handover_vae_config:
+	def __init__(self):
+		config = global_config()
+		self.batch_size = 100
+		self.num_joints = 12
+		self.joint_dims = 3
+		self.window_size = 5
+		self.hidden_sizes = [80, 40]
+		self.latent_dim = 10
+		self.beta = 0.005
+		self.activation = 'LeakyReLU'
+		self.z_prior_mean = 0
+		self.z_prior_std = 1
+
+
 class yumi_vae_config:
 	def __init__(self):
 		config = global_config()
@@ -66,6 +81,22 @@ class human_tdm_config:
 		self.decoder_sizes = [5, 5]
 		self.activation = 'Tanh'
 		self.output_dim = human_vae_config().latent_dim
+
+class handover_tdm_config:
+	def __init__(self):
+		config = global_config()
+		self.batch_size = 149
+		self.num_joints = 12
+		self.joint_dims = 3
+		self.num_actions = 2
+		self.lstm_hidden = 42
+		self.num_lstm_layers = 1
+		self.latent_dim = 10
+		# 'lstm_config: 'input_size = human_vae_config['num_joints*human_vae_config['joint_dims + NUM_ACTIONS 'hidden_size = 256 'num_layers = 3
+		self.decoder_sizes = [10, 10]
+		self.activation = 'Tanh'
+		self.output_dim = 10
+
 
 class hri_config:
 	def __init__(self):

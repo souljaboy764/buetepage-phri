@@ -9,8 +9,10 @@ import numpy as np
 import os, datetime, argparse
 
 import networks
-from config import global_config, human_tdm_config
+from config import *
 from utils import *
+
+from mild_hri.dataloaders import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -28,18 +30,13 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 		x = torch.Tensor(x[0])
 		label = torch.Tensor(label[0])
 		x = torch.cat([x,label], dim=-1)
-		seq_len, dims = x.shape
-		# mask = torch.arange(seq_len).unsqueeze(0).repeat(batch_size,1) < lens.unsqueeze(1).repeat(1,seq_len)
 		x1_tdm = x[:,p1_tdm_idx]
 		x2_tdm = x[:,p2_tdm_idx]
 		x1_vae = x[:,p1_vae_idx]
 		x2_vae = x[:,p2_vae_idx]
 
-		# zd1_dist, d1_samples, d1_dist = tdm_1(torch.nn.utils.rnn.pack_padded_sequence(x1_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
-		# zd2_dist, d2_samples, d2_dist = tdm_2(torch.nn.utils.rnn.pack_padded_sequence(x2_tdm.to(device), lens, batch_first=True, enforce_sorted=False), seq_len)
-
-		zd1_dist, d1_samples, d1_dist = tdm_1(x1_tdm.to(device), seq_len)
-		zd2_dist, d2_samples, d2_dist = tdm_2(x2_tdm.to(device), seq_len)
+		zd1_dist, d1_samples, d1_dist, _ = tdm_1(x1_tdm.to(device), None)
+		zd2_dist, d2_samples, d2_dist, _ = tdm_2(x2_tdm.to(device), None)
 		with torch.no_grad():
 			zx1_dist = vae(x1_vae.to(device), True)
 			zx2_dist = vae(x2_vae.to(device), True)
@@ -86,14 +83,12 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='SKID Training')
 	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', required=True,
 						help='Path to the VAE checkpoint, where the TDM models will also be saved.')
-	parser.add_argument('--src', type=str, default='./data/hh/tdm_data.npz', metavar='DATA',
-						help='Path to read training and testin data (default: ./data/hh/tdm_data.npz).')
 	args = parser.parse_args()
 	torch.manual_seed(42) # answer to life universe and everything OP
 	torch.autograd.set_detect_anomaly(True)
 
 	config = global_config()
-	tdm_config = human_tdm_config()
+	tdm_config = handover_tdm_config()
 
 	DEFAULT_RESULTS_FOLDER = os.path.dirname(os.path.dirname(args.vae_ckpt))
 	VAE_MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
@@ -137,38 +132,13 @@ if __name__=='__main__':
 	vae.eval()
 
 	print("Reading Data")
-	# with np.load(args.src, allow_pickle=True) as data:
-	# 	train_data = [torch.Tensor(traj) for traj in data['train_data']]
-	# 	test_data = [torch.Tensor(traj) for traj in data['test_data']]
-
-	# 	while len(train_data)<tdm_1.batch_size:
-	# 		train_data += train_data
-			
-	# 	train_num = len(train_data)
-	# 	test_num = len(test_data)
-	# 	sequences = train_data + test_data
-	# 	lens = []
-	# 	for traj in sequences:
-	# 		lens.append(traj.shape[0])
-
-	# 	# padded_sequences = pad_sequence(sequences, batch_first=True, padding_value=0.)
-	# 	train_data = sequences[:train_num]
-	# 	train_lens = lens[:train_num]
-	# 	test_data = sequences[train_num:]
-	# 	test_lens = lens[train_num:]
-	# 	train_iterator = DataLoader(list(zip(train_data,train_lens)), batch_size=1, shuffle=True)
-	# 	test_iterator = DataLoader(list(zip(test_data,test_lens)), batch_size=1, shuffle=True)
-	from mild_hri.dataloaders import *
-	dataset = buetepage.HHWindowDataset
+	dataset = alap.HHWindowDataset
 	
 	train_iterator = DataLoader(dataset(vae_args.src, train=True, window_length=config.WINDOW_LEN, downsample=0.2), batch_size=1, shuffle=True)
 	test_iterator = DataLoader(dataset(vae_args.src, train=False, window_length=config.WINDOW_LEN, downsample=0.2), batch_size=1, shuffle=False)
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
-	# tdm.eval()
-	# writer.add_graph(model, torch.Tensor(test_data[:10]).to(device))
-	# tdm.train()
 	s = ''
 	for k in config.__dict__:
 		s += str(k) + ' : ' + str(config.__dict__[k]) + '\n'

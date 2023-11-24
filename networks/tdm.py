@@ -38,8 +38,8 @@ class TDM(nn.Module):
 		self.output_mean = nn.Linear(dec_sizes[-1], self.output_dim)
 		self.output_std = nn.Sequential(nn.Linear(dec_sizes[-1], self.output_dim), nn.Softplus())
 
-	def forward(self, x, seq_len):
-		enc,_ = self._encoder(x)
+	def forward(self, x, lstm_state=None):
+		enc, lstm_state = self._encoder(x,lstm_state)
 		# enc, _ = pad_packed_sequence(enc, batch_first=True, total_length=seq_len)
 		enc = self.activation(enc)
 
@@ -53,4 +53,4 @@ class TDM(nn.Module):
 
 		zd_dist = Normal(self.output_mean(dec), self.output_std(dec)+1e-4)
 
-		return zd_dist, d_samples, d_dist
+		return zd_dist, d_samples, d_dist, lstm_state

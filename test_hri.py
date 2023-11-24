@@ -22,8 +22,9 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 pred_mse = []
 pred_mse_nowave = []
 pred_mse_actions = [[],[],[],[]]
-print('Trial\tPred. MSE (all)\t\tPred. MSE w/o waving\t\tPred. MSE waving\t\tPred. MSE handshake\t\tPred. MSE rocket\t\tPred. MSE parachute')
-print('\tmean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma')
+best_action_mse = [1000,1000,1000,1000]
+print('Pred. MSE waving\t\tPred. MSE handshake\t\tPred. MSE rocket\t\tPred. MSE parachute')
+print('mean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma')
 for trial in range(4):
 	VAE_MODELS_FOLDER = os.path.join(args.robot_ckpt, f'trial{trial}', "models")
 	DEFAULT_RESULTS_FOLDER = os.path.dirname(VAE_MODELS_FOLDER)
@@ -69,7 +70,7 @@ for trial in range(4):
 	# 	test_iterator = DataLoader(test_data, batch_size=1, shuffle=True)
 	from mild_hri.dataloaders import *
 	if robot_vae_args.model =='VAE_PEPPER':
-		dataset = buetepage.PepperWindowDataset
+		dataset = nuisi.PepperWindowDataset
 	elif robot_vae_args.model =='VAE_YUMI':
 		dataset = buetepage_hr.YumiWindowDataset
 
@@ -88,12 +89,20 @@ for trial in range(4):
 			x_p1_tdm = x[:,p1_tdm_idx].to(device)
 			x_r2_gt = x[:,r2_vae_idx].to(device)
 			x_r2_hri = x[:,r2_hri_idx].to(device)
-			with torch.no_grad():
-				_, _, d_x1_dist = human_tdm(x_p1_tdm, None)
-				hri_input = torch.concat([x_r2_hri, d_x1_dist.mean], dim=-1)
-				z_r2hri_dist, z_r2hri_samples = hri(hri_input, None)
-				x_r2_gen = robot_vae._output(robot_vae._decoder(z_r2hri_dist.mean))
-
+			tdm_lstm_state = None
+			hri_lstm_state = None
+			current_robot_state = x_r2_hri[0:1]
+			x_r2_gen = []
+			for t in range(seq_len):
+				with torch.no_grad():
+					_, _, d_x1_dist, tdm_lstm_state = human_tdm(x_p1_tdm[t:t+1], tdm_lstm_state)
+					hri_input = torch.concat([current_robot_state, d_x1_dist.mean], dim=-1)
+					z_r2hri_dist, z_r2hri_samples, hri_lstm_state = hri(hri_input, hri_lstm_state)
+					robot_pred = robot_vae._output(robot_vae._decoder(z_r2hri_dist.mean))
+					x_r2_gen.append(robot_pred)
+					robot_pred = robot_pred.reshape((robot_vae.window_size, robot_vae.num_joints))
+					current_robot_state[0, :robot_vae.num_joints] = robot_pred[0]
+			x_r2_gen = torch.cat(x_r2_gen)
 			pred_mse_actions_ckpt[-1] += ((x_r2_gt - x_r2_gen)**2).reshape((seq_len, robot_vae.window_size, robot_vae.num_joints, robot_vae.joint_dims)).sum(-1).mean(-1).mean(-1).detach().cpu().numpy().tolist()
 
 	pred_mse_ckpt = []
@@ -102,16 +111,19 @@ for trial in range(4):
 		pred_mse_ckpt+= mse
 	for mse in pred_mse_actions_ckpt[1:]:
 		pred_mse_nowave_ckpt+= mse
-	s = f'{trial}'#{np.mean(pred_mse_ckpt):.4e}\t{np.std(pred_mse_ckpt):.4e}\t{np.mean(pred_mse_nowave_ckpt):.4e}\t{np.std(pred_mse_nowave_ckpt):.4e}'
-	for mse in pred_mse_actions_ckpt:
-		s += f'\t{np.mean(mse):.3f} $\pm$ {np.std(mse):.3f}'
-	print(s)
+	# s = f'{trial}'#{np.mean(pred_mse_ckpt):.4e}\t{np.std(pred_mse_ckpt):.4e}\t{np.mean(pred_mse_nowave_ckpt):.4e}\t{np.std(pred_mse_nowave_ckpt):.4e}'
 
 	pred_mse += pred_mse_ckpt
 	pred_mse_nowave += pred_mse_nowave_ckpt
 	for i in range(4):
-		pred_mse_actions[i] += pred_mse_actions_ckpt[i]
-
+		if best_action_mse[i] > np.mean(pred_mse_actions_ckpt[i]):
+			best_action_mse[i] = np.mean(pred_mse_actions_ckpt[i])
+			pred_mse_actions[i] = pred_mse_actions_ckpt[i]
+s = ''
+for mse in pred_mse_actions:
+	s += f'\t{np.mean(mse):.3f} $\pm$ {np.std(mse):.3f}'
+print(s)
+np.savez_compressed('logs/mse/yumi_20hz_3joints_xvel.npz', np.array(pred_mse_actions,dtype=object))
 # s = f'all\t{np.mean(pred_mse):.4e}\t{np.std(pred_mse):.4e}\t{np.mean(pred_mse_nowave):.4e}\t{np.std(pred_mse_nowave):.4e}'
 # for mse in pred_mse_actions:
 # 	s += f'\t{np.mean(mse):.4e}\t{np.std(mse):.4e}'

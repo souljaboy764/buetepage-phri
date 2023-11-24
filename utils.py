@@ -16,15 +16,20 @@ colors_10 = get_cmap('tab10')
 # p1_vae_idx = np.arange(480)
 # p2_vae_idx = np.arange(480) + 480
 
-p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-4,0)])
-p2_tdm_idx = np.concatenate([90+np.arange(18),np.arange(-4,0)])
-p1_vae_idx = np.arange(90)
-p2_vae_idx = np.arange(90) + 90
+# p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-4,0)])
+# p2_tdm_idx = np.concatenate([90+np.arange(18),np.arange(-4,0)])
+# p1_vae_idx = np.arange(90)
+# p2_vae_idx = np.arange(90) + 90
 
-# r2_hri_idx = np.concatenate([90+np.arange(7),np.arange(-4,0)])
-# r2_vae_idx = 90 + np.arange(35)
-r2_hri_idx = np.concatenate([90+np.arange(4),np.arange(-4,0)])
-r2_vae_idx = 90 + np.arange(20)
+p1_tdm_idx = np.concatenate([np.arange(36),np.arange(-2,0)])
+p2_tdm_idx = np.concatenate([180+np.arange(36),np.arange(-2,0)])
+p1_vae_idx = np.arange(180)
+p2_vae_idx = np.arange(180) + 180
+
+r2_hri_idx = np.concatenate([90+np.arange(7),np.arange(-4,0)])
+r2_vae_idx = 90 + np.arange(35)
+# r2_hri_idx = np.concatenate([90+np.arange(4),np.arange(-4,0)])
+# r2_vae_idx = 90 + np.arange(20)
 
 
 def downsample_trajs(train_data, downsample_len):

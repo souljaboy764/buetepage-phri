@@ -156,3 +156,4 @@ results*/
 logs/
 data/
 .vscode
+train.sh

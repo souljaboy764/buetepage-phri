@@ -44,7 +44,7 @@ if __name__=='__main__':
 						help='Path for saving results (default: ./logs/debug).')
 	parser.add_argument('--src', type=str, default='/home/vignesh/playground/mild_hri/data/nuisi/traj_data.npz', metavar='SRC',
 						help='Path to read training and testing data (default: ./data/hh/vae_data.npz).') # ./data/hr/vae_data.npz for HRI
-	parser.add_argument('--model', type=str, default='VAE_HH', metavar='TYPE', choices=['VAE_HH', "VAE_YUMI", "VAE_PEPPER"],
+	parser.add_argument('--model', type=str, default='VAE_HH', metavar='TYPE', choices=['VAE_HH', "VAE_YUMI", "VAE_PEPPER", 'VAE_ALAP'],
 						help='Which model to use (VAE_HH, VAE_YUMI or VAE_PEPPER) (default: VAE).')					
 	args = parser.parse_args()
 	seed = np.random.randint(0,np.iinfo(np.int32).max)
@@ -58,8 +58,10 @@ if __name__=='__main__':
 		vae_config = human_vae_config()
 	elif args.model == 'VAE_YUMI':
 		vae_config = yumi_vae_config()
-	else:
+	elif args.model == 'VAE_PEPPER':
 		vae_config = pepper_vae_config()
+	elif args.model == 'VAE_ALAP':
+		vae_config = handover_vae_config()
 
 
 	MODELS_FOLDER = os.path.join(args.results, "models")
@@ -102,11 +104,13 @@ if __name__=='__main__':
 	# 		test_data = test_data[:, -model.input_dim:]
 	from mild_hri.dataloaders import *
 	if args.model =='VAE_HH':
-		dataset = buetepage.HHWindowDataset
+		dataset = nuisi.HHWindowDataset
 	elif args.model =='VAE_PEPPER':
-		dataset = buetepage.PepperWindowDataset
+		dataset = nuisi.PepperWindowDataset
 	elif args.model =='VAE_YUMI':
 		dataset = buetepage_hr.YumiWindowDataset
+	elif args.model =='VAE_ALAP':
+		dataset = alap.HHWindowDataset
 	
 	train_dataset = dataset(args.src, train=True, window_length=config.WINDOW_LEN, downsample=0.2)
 	test_dataset = dataset(args.src, train=False, window_length=config.WINDOW_LEN, downsample=0.2)
