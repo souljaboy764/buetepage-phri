@@ -10,6 +10,8 @@ import networks
 from config import *
 from utils import *
 
+from phd_utils.dataloaders import *
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def run_iters_vae(iterator, model, optimizer):
@@ -42,27 +44,26 @@ if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
 	parser.add_argument('--results', type=str, default='./logs/debug', metavar='DST',
 						help='Path for saving results (default: ./logs/debug).')
-	parser.add_argument('--src', type=str, default='/home/vignesh/playground/mild_hri/data/nuisi/traj_data.npz', metavar='SRC',
-						help='Path to read training and testing data (default: ./data/hh/vae_data.npz).') # ./data/hr/vae_data.npz for HRI
-	parser.add_argument('--model', type=str, default='VAE_HH', metavar='TYPE', choices=['VAE_HH', "VAE_YUMI", "VAE_PEPPER", 'VAE_ALAP'],
-						help='Which model to use (VAE_HH, VAE_YUMI or VAE_PEPPER) (default: VAE).')					
+	parser.add_argument('--ckpt', type=str, default=None, metavar='CKPT',
+						help='Checkpoint to load model weights. (default: None)')
+	parser.add_argument('--model', type=str, default='ALAP', metavar='TYPE', choices=['HH', "PEPPER", 'NUISI_HH', "NUISI_PEPPER", "YUMI", 'ALAP'],
+						help='Which model to use (HH, PEPPER, NUISI_HH, NUISI_PEPPER, YUMI or ALAP) (default: HH).')
 	args = parser.parse_args()
 	seed = np.random.randint(0,np.iinfo(np.int32).max)
 	torch.manual_seed(seed)
 	torch.autograd.set_detect_anomaly(True)
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-	is_hri = args.model.split('_')[1]!='HH'
+	is_hri = not (args.model == 'HH' or args.model == 'NUISI_HH' or args.model == 'ALAP')
 	config = global_config()
-	if args.model == 'VAE_HH':
-		vae_config = human_vae_config()
-	elif args.model == 'VAE_YUMI':
-		vae_config = yumi_vae_config()
-	elif args.model == 'VAE_PEPPER':
-		vae_config = pepper_vae_config()
-	elif args.model == 'VAE_ALAP':
-		vae_config = handover_vae_config()
-
+	if args.model == 'HH' or args.model == 'NUISI_HH':
+		config = human_config()
+	elif args.model == 'PEPPER' or args.model == 'NUISI_PEPPER':
+		config = pepper_config()
+	elif args.model == 'YUMI':
+		config = yumi_config()
+	elif args.model == 'ALAP':
+		config = handover_config()
 
 	MODELS_FOLDER = os.path.join(args.results, "models")
 	SUMMARIES_FOLDER = os.path.join(args.results, "summary")
@@ -74,50 +75,51 @@ if __name__=='__main__':
 		os.makedirs(MODELS_FOLDER)
 	if not os.path.exists(SUMMARIES_FOLDER):
 		os.makedirs(SUMMARIES_FOLDER)
-	np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, vae_config=vae_config)
+	np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, config=config)
 
 	print("Creating Model and Optimizer")
-	model = networks.VAE(**(vae_config.__dict__)).to(device)
+	model = networks.VAE(**(config.__dict__)).to(device)
 	optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
 
-	# if os.path.exists(os.path.join(MODELS_FOLDER, 'final.pth')):
-	# 	print("Loading Checkpoints")
-	# 	ckpt = torch.load(os.path.join(MODELS_FOLDER, 'final.pth'))
-	# 	model.load_state_dict(ckpt['model'])
-	# 	optimizer.load_state_dict(ckpt['optimizer'])
-	# 	global_step = ckpt['epoch']
+	if args.ckpt is not None:
+		ckpt = torch.load(args.ckpt)
+		model.load_state_dict(ckpt['model'])
+		optimizer.load_state_dict(ckpt['optimizer'])
 
 	print("Reading Data")
-	# with np.load(args.src, allow_pickle=True) as data:
-	# 	train_data = np.array(data['train_data']).astype(np.float32)
-	# 	test_data = np.array(data['test_data']).astype(np.float32)
-	# 	if args.model == 'VAE_HH':
-	# 		num_samples, dim = train_data.shape
-	# 		train_p1 = train_data[:, :dim//2]
-	# 		train_p2 = train_data[:, dim//2:]
-	# 		test_p1 = test_data[:, :dim//2]
-	# 		test_p2 = test_data[:, dim//2:]
-	# 		train_data = np.vstack([train_p1, train_p2])
-	# 		test_data = np.vstack([test_p1, test_p2])
-	# 	else:
-	# 		train_data = train_data[:, -model.input_dim:]
-	# 		test_data = test_data[:, -model.input_dim:]
-	from mild_hri.dataloaders import *
-	if args.model =='VAE_HH':
+	if args.model =='HH':
+		dataset = buetepage.HHWindowDataset
+	elif args.model =='PEPPER':
+		dataset = buetepage.PepperWindowDataset
+	if args.model =='NUISI_HH':
 		dataset = nuisi.HHWindowDataset
-	elif args.model =='VAE_PEPPER':
+	elif args.model =='NUISI_PEPPER':
 		dataset = nuisi.PepperWindowDataset
-	elif args.model =='VAE_YUMI':
+	elif args.model =='YUMI':
 		dataset = buetepage_hr.YumiWindowDataset
-	elif args.model =='VAE_ALAP':
+	elif args.model =='ALAP':
 		dataset = alap.HHWindowDataset
 	
-	train_dataset = dataset(args.src, train=True, window_length=config.WINDOW_LEN, downsample=0.2)
-	test_dataset = dataset(args.src, train=False, window_length=config.WINDOW_LEN, downsample=0.2)
+	train_dataset = dataset(train=True, window_length=config.WINDOW_LEN, downsample=0.2)
+	test_dataset = dataset(train=False, window_length=config.WINDOW_LEN, downsample=0.2)
+
+	train_dataset.labels = []
+	for idx in range(len(train_dataset.actidx)):
+		for i in range(train_dataset.actidx[idx][0], train_dataset.actidx[idx][1]):
+			label = np.zeros((train_dataset.traj_data[i].shape[0], len(train_dataset.actidx)))
+			label[:, idx] = 1
+			train_dataset.labels.append(label)
+
+	test_dataset.labels = []
+	for idx in range(len(test_dataset.actidx)):
+		for i in range(test_dataset.actidx[idx][0], test_dataset.actidx[idx][1]):
+			label = np.zeros((test_dataset.traj_data[i].shape[0], len(test_dataset.actidx)))
+			label[:, idx] = 1
+			test_dataset.labels.append(label)
 
 	train_data = np.concatenate(train_dataset.traj_data).astype(np.float32)
 	test_data = np.concatenate(test_dataset.traj_data).astype(np.float32)
-	if args.model =='VAE_HH':
+	if args.model =='HH' or args.model == 'NUISI_HH':
 		train_data = np.concatenate([train_data[:, :model.input_dim], train_data[:, model.input_dim:]])
 		test_data = np.concatenate([test_data[:, :model.input_dim], test_data[:, model.input_dim:]])
 	else:
@@ -137,9 +139,9 @@ if __name__=='__main__':
 	writer.add_text('global_config', s)
 
 	s = ''
-	for k in vae_config.__dict__:
-		s += str(k) + ' : ' + str(vae_config.__dict__[k]) + '\n'
-	writer.add_text('vae_config', s)
+	for k in config.__dict__:
+		s += str(k) + ' : ' + str(config.__dict__[k]) + '\n'
+	writer.add_text('config', s)
 
 	writer.flush()
 
