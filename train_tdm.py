@@ -96,7 +96,7 @@ if __name__=='__main__':
 	vae_args = vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
 	vae_config = vae_hyperparams['config'].item()
 
-	if vae_args.model == 'HH' or vae_args.model == 'NUISI_HH':
+	if vae_args.model == 'BP_HH' or vae_args.model == 'NUISI_HH':
 		tdm_config = human_tdm_config()
 	elif vae_args.model == 'ALAP':
 		tdm_config = handover_tdm_config()
@@ -123,7 +123,7 @@ if __name__=='__main__':
 	vae.eval()
 
 	print("Reading Data")
-	if vae_args.model =='HH':
+	if vae_args.model =='BP_HH':
 		dataset = buetepage.HHWindowDataset
 	elif vae_args.model =='NUISI_HH':
 		dataset = nuisi.HHWindowDataset
@@ -150,7 +150,7 @@ if __name__=='__main__':
 	train_iterator = DataLoader(train_dataset, batch_size=1, shuffle=True)
 	test_iterator = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
-	if vae_args.model == 'HH' or vae_args.model == 'NUISI_HH':
+	if vae_args.model == 'BP_HH' or vae_args.model == 'NUISI_HH':
 		tdm_config = human_tdm_config()
 		p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-4,0)])
 		p2_tdm_idx = np.concatenate([90+np.arange(18),np.arange(-4,0)])

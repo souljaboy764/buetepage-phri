@@ -46,21 +46,21 @@ if __name__=='__main__':
 						help='Path for saving results (default: ./logs/debug).')
 	parser.add_argument('--ckpt', type=str, default=None, metavar='CKPT',
 						help='Checkpoint to load model weights. (default: None)')
-	parser.add_argument('--model', type=str, default='HH', metavar='TYPE', choices=['HH', "PEPPER", 'NUISI_HH', "NUISI_PEPPER", "YUMI", 'ALAP'],
-						help='Which model to use (HH, PEPPER, NUISI_HH, NUISI_PEPPER, YUMI or ALAP) (default: HH).')
+	parser.add_argument('--model', type=str, default='BP_HH', metavar='TYPE', choices=['BP_HH', "BP_PEPPER", 'NUISI_HH', "NUISI_PEPPER", "BP_YUMI", 'ALAP'],
+						help='Which model to use (BP_HH, BP_PEPPER, NUISI_HH, NUISI_PEPPER, BP_YUMI or ALAP) (default: BP_HH).')
 	args = parser.parse_args()
 	seed = np.random.randint(0,np.iinfo(np.int32).max)
 	torch.manual_seed(seed)
 	torch.autograd.set_detect_anomaly(True)
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-	is_hri = not (args.model == 'HH' or args.model == 'NUISI_HH' or args.model == 'ALAP')
+	is_hri = not (args.model == 'BP_HH' or args.model == 'NUISI_HH' or args.model == 'ALAP')
 	global_config = global_config()
-	if args.model == 'HH' or args.model == 'NUISI_HH':
+	if args.model == 'BP_HH' or args.model == 'NUISI_HH':
 		config = human_vae_config()
-	elif args.model == 'PEPPER' or args.model == 'NUISI_PEPPER':
+	elif args.model == 'BP_PEPPER' or args.model == 'NUISI_PEPPER':
 		config = pepper_vae_config()
-	elif args.model == 'YUMI':
+	elif args.model == 'BP_YUMI':
 		config = yumi_vae_config()
 	elif args.model == 'ALAP':
 		config = handover_vae_config()
@@ -87,15 +87,15 @@ if __name__=='__main__':
 		optimizer.load_state_dict(ckpt['optimizer'])
 
 	print("Reading Data")
-	if args.model =='HH':
+	if args.model =='BP_HH':
 		dataset = buetepage.HHWindowDataset
-	elif args.model =='PEPPER':
+	elif args.model =='BP_PEPPER':
 		dataset = buetepage.PepperWindowDataset
 	elif args.model =='NUISI_HH':
 		dataset = nuisi.HHWindowDataset
 	elif args.model =='NUISI_PEPPER':
 		dataset = nuisi.PepperWindowDataset
-	elif args.model =='YUMI':
+	elif args.model =='BP_YUMI':
 		dataset = buetepage_hr.YumiWindowDataset
 	elif args.model =='ALAP':
 		dataset = alap.HHWindowDataset
@@ -119,7 +119,7 @@ if __name__=='__main__':
 
 	train_data = np.concatenate(train_dataset.traj_data).astype(np.float32)
 	test_data = np.concatenate(test_dataset.traj_data).astype(np.float32)
-	if args.model =='HH' or args.model == 'NUISI_HH':
+	if args.model =='BP_HH' or args.model == 'NUISI_HH':
 		train_data = np.concatenate([train_data[:, :model.input_dim], train_data[:, model.input_dim:]])
 		test_data = np.concatenate([test_data[:, :model.input_dim], test_data[:, model.input_dim:]])
 	else:
