@@ -41,12 +41,12 @@ def run_iters_vae(iterator, model, optimizer):
 	return total_recon, total_kl, total_loss, x_gen.reshape(-1, model.window_size, model.num_joints, model.joint_dims), zpost_samples, x.reshape(-1, model.window_size, model.num_joints, model.joint_dims), iters
 
 if __name__=='__main__':
-	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Training')
+	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) VAE Training')
 	parser.add_argument('--results', type=str, default='./logs/debug', metavar='DST',
 						help='Path for saving results (default: ./logs/debug).')
 	parser.add_argument('--ckpt', type=str, default=None, metavar='CKPT',
 						help='Checkpoint to load model weights. (default: None)')
-	parser.add_argument('--model', type=str, default='ALAP', metavar='TYPE', choices=['HH', "PEPPER", 'NUISI_HH', "NUISI_PEPPER", "YUMI", 'ALAP'],
+	parser.add_argument('--model', type=str, default='HH', metavar='TYPE', choices=['HH', "PEPPER", 'NUISI_HH', "NUISI_PEPPER", "YUMI", 'ALAP'],
 						help='Which model to use (HH, PEPPER, NUISI_HH, NUISI_PEPPER, YUMI or ALAP) (default: HH).')
 	args = parser.parse_args()
 	seed = np.random.randint(0,np.iinfo(np.int32).max)
@@ -55,15 +55,15 @@ if __name__=='__main__':
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 	is_hri = not (args.model == 'HH' or args.model == 'NUISI_HH' or args.model == 'ALAP')
-	config = global_config()
+	global_config = global_config()
 	if args.model == 'HH' or args.model == 'NUISI_HH':
-		config = human_config()
+		config = human_vae_config()
 	elif args.model == 'PEPPER' or args.model == 'NUISI_PEPPER':
-		config = pepper_config()
+		config = pepper_vae_config()
 	elif args.model == 'YUMI':
-		config = yumi_config()
+		config = yumi_vae_config()
 	elif args.model == 'ALAP':
-		config = handover_config()
+		config = handover_vae_config()
 
 	MODELS_FOLDER = os.path.join(args.results, "models")
 	SUMMARIES_FOLDER = os.path.join(args.results, "summary")
@@ -75,11 +75,11 @@ if __name__=='__main__':
 		os.makedirs(MODELS_FOLDER)
 	if not os.path.exists(SUMMARIES_FOLDER):
 		os.makedirs(SUMMARIES_FOLDER)
-	np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=config, config=config)
+	np.savez_compressed(os.path.join(MODELS_FOLDER,'hyperparams.npz'), args=args, global_config=global_config, config=config)
 
 	print("Creating Model and Optimizer")
 	model = networks.VAE(**(config.__dict__)).to(device)
-	optimizer = getattr(torch.optim, config.optimizer)(model.parameters(), lr=config.lr)
+	optimizer = getattr(torch.optim, global_config.optimizer)(model.parameters(), lr=global_config.lr)
 
 	if args.ckpt is not None:
 		ckpt = torch.load(args.ckpt)
@@ -91,7 +91,7 @@ if __name__=='__main__':
 		dataset = buetepage.HHWindowDataset
 	elif args.model =='PEPPER':
 		dataset = buetepage.PepperWindowDataset
-	if args.model =='NUISI_HH':
+	elif args.model =='NUISI_HH':
 		dataset = nuisi.HHWindowDataset
 	elif args.model =='NUISI_PEPPER':
 		dataset = nuisi.PepperWindowDataset
@@ -100,8 +100,8 @@ if __name__=='__main__':
 	elif args.model =='ALAP':
 		dataset = alap.HHWindowDataset
 	
-	train_dataset = dataset(train=True, window_length=config.WINDOW_LEN, downsample=0.2)
-	test_dataset = dataset(train=False, window_length=config.WINDOW_LEN, downsample=0.2)
+	train_dataset = dataset(train=True, window_length=global_config.WINDOW_LEN, downsample=0.2)
+	test_dataset = dataset(train=False, window_length=global_config.WINDOW_LEN, downsample=0.2)
 
 	train_dataset.labels = []
 	for idx in range(len(train_dataset.actidx)):
@@ -133,8 +133,8 @@ if __name__=='__main__':
 	writer = SummaryWriter(SUMMARIES_FOLDER)
 	
 	s = ''
-	for k in config.__dict__:
-		s += str(k) + ' : ' + str(config.__dict__[k]) + '\n'
+	for k in global_config.__dict__:
+		s += str(k) + ' : ' + str(global_config.__dict__[k]) + '\n'
 	s += 'seed:'+str(seed)+'\n'
 	writer.add_text('global_config', s)
 
@@ -146,7 +146,7 @@ if __name__=='__main__':
 	writer.flush()
 
 	print("Starting Epochs")
-	for epoch in range(config.EPOCHS):
+	for epoch in range(global_config.EPOCHS):
 		model.train()
 		train_recon, train_kl, train_loss, x_gen, zx_samples, x, iters = run_iters_vae(train_iterator, model, optimizer)
 		steps_done = (epoch+1)*iters
@@ -161,7 +161,7 @@ if __name__=='__main__':
 			if torch.allclose(param.grad, torch.zeros_like(param.grad)):
 				print('zero grad for',name)
 		
-		if epoch % config.EPOCHS_TO_SAVE == 0:
+		if epoch % global_config.EPOCHS_TO_SAVE == 0:
 			model.eval()
 			with torch.no_grad():
 				test_recon, test_kl, test_loss, x_gen, zx_samples, x, iters = run_iters_vae(test_iterator, model, optimizer)
