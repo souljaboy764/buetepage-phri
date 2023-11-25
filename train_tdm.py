@@ -1,18 +1,15 @@
 import torch
-from torch import nn
-import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import *
 from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
-import os, datetime, argparse
+import os, argparse
 
 import networks
 from config import *
 from utils import *
 
-from mild_hri.dataloaders import *
+from phd_utils.dataloaders import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -59,8 +56,6 @@ def run_iters_tdm(iterator, tdm, vae, optimizer):
 
 		if tdm_1.training:
 			loss.backward()
-			# nn.utils.clip_grad_norm_(tdm_1.parameters(), 1.0)
-			# nn.utils.clip_grad_norm_(tdm_2.parameters(), 1.0)
 			optimizer.step()
 		iters += 1
 
@@ -75,20 +70,17 @@ def write_summaries_tdm(writer, loss, jsd, kl_1, kl_2, d1_samples, d2_samples, s
 	writer.add_histogram('latents/d1_samples', d1_samples.mean(0), steps_done)
 	writer.add_histogram('latents/d2_samples', d2_samples.mean(0), steps_done)
 
-	d = torch.concat([d1_samples[:100], d2_samples[:100]], dim=0)
-	d_labels = torch.concat([torch.ones(100), torch.ones(100)+1],dim=0)
-	# writer.add_embedding(d, metadata=d_labels, global_step=steps_done, tag=prefix+'/q(d|z)')
-
 if __name__=='__main__':
-	parser = argparse.ArgumentParser(description='SKID Training')
+	parser = argparse.ArgumentParser(description='Buetepage et al. (2020) TDM Training')
 	parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', required=True,
 						help='Path to the VAE checkpoint, where the TDM models will also be saved.')
+	parser.add_argument('--ckpt', type=str, default=None, metavar='CKPT',
+						help='Checkpoint to load model weights. (default: None)')
 	args = parser.parse_args()
 	torch.manual_seed(42) # answer to life universe and everything OP
 	torch.autograd.set_detect_anomaly(True)
 
 	config = global_config()
-	tdm_config = handover_tdm_config()
 
 	DEFAULT_RESULTS_FOLDER = os.path.dirname(os.path.dirname(args.vae_ckpt))
 	VAE_MODELS_FOLDER = os.path.join(DEFAULT_RESULTS_FOLDER, "models")
@@ -100,17 +92,16 @@ if __name__=='__main__':
 		print('Please use the same directory as the final VAE model')
 		exit(-1)
 
-	# if os.path.exists(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz')):
-	# 	hyperparams = np.load(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz'), allow_pickle=True)
-	# 	args = hyperparams['args'].item() # overwrite args if loading from checkpoint
-	# 	config = hyperparams['global_config'].item()
-	# 	tdm_config = hyperparams['tdm_config'].item()
-	# else:
-	np.savez_compressed(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz'), args=args, global_config=config, tdm_config=tdm_config)
-
 	vae_hyperparams = np.load(os.path.join(VAE_MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
 	vae_args = vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
-	vae_config = vae_hyperparams['vae_config'].item()
+	vae_config = vae_hyperparams['config'].item()
+
+	if vae_args.model == 'HH' or vae_args.model == 'NUISI_HH':
+		tdm_config = human_tdm_config()
+	elif vae_args.model == 'ALAP':
+		tdm_config = handover_tdm_config()
+
+	np.savez_compressed(os.path.join(MODELS_FOLDER,'tdm_hyperparams.npz'), args=args, global_config=config, tdm_config=tdm_config)
 
 	print("Creating Model and Optimizer")
 	tdm_1 = networks.TDM(**(tdm_config.__dict__)).to(device)
@@ -118,24 +109,59 @@ if __name__=='__main__':
 	optimizer = getattr(torch.optim, config.optimizer)(list(tdm_1.parameters()) + list(tdm_2.parameters()), lr=config.lr)
 
 	# if os.path.exists(os.path.join(MODELS_FOLDER, 'tdm_final.pth')):
-	# 	print("Loading Checkpoints")
-	# 	ckpt = torch.load(os.path.join(MODELS_FOLDER, 'tdm_final.pth'))
-	# 	tdm_1.load_state_dict(ckpt['model_1'])
-	# 	tdm_2.load_state_dict(ckpt['model_2'])
-	# 	optimizer.load_state_dict(ckpt['optimizer'])
-	# 	global_step = ckpt['epoch']
+	if args.ckpt is not None:
+		print("Loading Checkpoints")
+		ckpt = torch.load(os.path.join(MODELS_FOLDER, 'tdm_final.pth'))
+		tdm_1.load_state_dict(ckpt['model_1'])
+		tdm_2.load_state_dict(ckpt['model_2'])
+		optimizer.load_state_dict(ckpt['optimizer'])
+		global_step = ckpt['epoch']
 
 	vae = networks.VAE(**(vae_config.__dict__)).to(device)
-	# ckpt = torch.load(os.path.join(VAE_MODELS_FOLDER, 'final.pth'))
 	ckpt = torch.load(args.vae_ckpt)
 	vae.load_state_dict(ckpt['model'])
 	vae.eval()
 
 	print("Reading Data")
-	dataset = alap.HHWindowDataset
+	if vae_args.model =='HH':
+		dataset = buetepage.HHWindowDataset
+	elif vae_args.model =='NUISI_HH':
+		dataset = nuisi.HHWindowDataset
+	elif vae_args.model =='ALAP':
+		dataset = alap.HHWindowDataset
+
+	train_dataset = dataset(train=True, window_length=config.WINDOW_LEN, downsample=0.2)
+	test_dataset = dataset(train=False, window_length=config.WINDOW_LEN, downsample=0.2)
 	
-	train_iterator = DataLoader(dataset(vae_args.src, train=True, window_length=config.WINDOW_LEN, downsample=0.2), batch_size=1, shuffle=True)
-	test_iterator = DataLoader(dataset(vae_args.src, train=False, window_length=config.WINDOW_LEN, downsample=0.2), batch_size=1, shuffle=False)
+	train_dataset.labels = []
+	for idx in range(len(train_dataset.actidx)):
+		for i in range(train_dataset.actidx[idx][0], train_dataset.actidx[idx][1]):
+			label = np.zeros((train_dataset.traj_data[i].shape[0], len(train_dataset.actidx)))
+			label[:, idx] = 1
+			train_dataset.labels.append(label)
+
+	test_dataset.labels = []
+	for idx in range(len(test_dataset.actidx)):
+		for i in range(test_dataset.actidx[idx][0], test_dataset.actidx[idx][1]):
+			label = np.zeros((test_dataset.traj_data[i].shape[0], len(test_dataset.actidx)))
+			label[:, idx] = 1
+			test_dataset.labels.append(label)
+
+	train_iterator = DataLoader(train_dataset, batch_size=1, shuffle=True)
+	test_iterator = DataLoader(test_dataset, batch_size=1, shuffle=True)
+
+	if vae_args.model == 'HH' or vae_args.model == 'NUISI_HH':
+		tdm_config = human_tdm_config()
+		p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-4,0)])
+		p2_tdm_idx = np.concatenate([90+np.arange(18),np.arange(-4,0)])
+		p1_vae_idx = np.arange(90)
+		p2_vae_idx = np.arange(90) + 90
+	elif vae_args.model == 'ALAP':
+		tdm_config = handover_tdm_config()
+		p1_tdm_idx = np.concatenate([np.arange(36),np.arange(-2,0)])
+		p2_tdm_idx = np.concatenate([180+np.arange(36),np.arange(-2,0)])
+		p1_vae_idx = np.arange(180)
+		p2_vae_idx = np.arange(180) + 180
 
 	print("Building Writer")
 	writer = SummaryWriter(SUMMARIES_FOLDER)
