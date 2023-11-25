@@ -1,23 +1,17 @@
 import torch
-from torch import nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import *
 from torch.utils.tensorboard import SummaryWriter
 
 import numpy as np
-import os, datetime, argparse
-import matplotlib.pyplot as plt
-from matplotlib.cm import get_cmap
-# import dataloaders
-
-colors_10 = get_cmap('tab10')
+import os, argparse
 
 import networks
 from config import *
 from utils import *
 
-from mild_hri.dataloaders import *
+from phd_utils.dataloaders import *
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 def run_iters_hri(iterator:DataLoader, hri:networks.HRIDynamics, robot_vae:networks.VAE, human_tdm:networks.TDM, optimizer:torch.optim.Optimizer):
@@ -68,9 +62,9 @@ def write_summaries_hri(writer, loss, recon_loss, kl_loss, x_gen, x, z_r2hri_sam
 
 if __name__=='__main__':
 	parser = argparse.ArgumentParser(description='Training Human-Robot Interactive Dynamics')
-	parser.add_argument('--human-ckpt', type=str, metavar='HUMAN-CKPT', default='logs/vae_hh_orig_oldcommit_AdamW_07011535_tdmfixed/tdm/models/tdm_final.pth',
+	parser.add_argument('--human-ckpt', type=str, metavar='HUMAN-CKPT', required=True,
 						help='Path to the Human TDM checkpoint.')
-	parser.add_argument('--robot-ckpt', type=str, metavar='ROBOT-CKPT', default='logs/vae_hr_AdamW_07031331/models/final.pth',
+	parser.add_argument('--robot-ckpt', type=str, metavar='ROBOT-CKPT', required=True,
 						help='Path to the robot VAE checkpoint, where the TDM models will also be saved.')
 	args = parser.parse_args()
 	torch.manual_seed(128542)
@@ -90,7 +84,7 @@ if __name__=='__main__':
 
 	robot_vae_hyperparams = np.load(os.path.join(VAE_MODELS_FOLDER,'hyperparams.npz'), allow_pickle=True)
 	robot_vae_args = robot_vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
-	robot_vae_config = robot_vae_hyperparams['vae_config'].item()
+	robot_vae_config = robot_vae_hyperparams['config'].item()
 	robot_vae = networks.VAE(**(robot_vae_config.__dict__)).to(device)
 	ckpt = torch.load(args.robot_ckpt)
 	robot_vae.load_state_dict(ckpt['model'])
@@ -108,15 +102,45 @@ if __name__=='__main__':
 	hri_config = hri_config()
 
 	print("Reading Data")
-	if robot_vae_args.model =='VAE_PEPPER':
+	p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-4,0)])
+	p2_tdm_idx = np.concatenate([90+np.arange(18),np.arange(-4,0)])
+	p1_vae_idx = np.arange(90)
+	p2_vae_idx = np.arange(90) + 90
+	if robot_vae_args.model =='BP_PEPPER':
+		dataset = buetepage.PepperWindowDataset
+		hri_config.num_joints = 4
+		r2_hri_idx = np.concatenate([90+np.arange(4),np.arange(-4,0)])
+		r2_vae_idx = 90 + np.arange(20)
+	elif robot_vae_args.model =='NUISI_PEPPER':
 		dataset = nuisi.PepperWindowDataset
 		hri_config.num_joints = 4
-	elif robot_vae_args.model =='VAE_YUMI':
+		r2_hri_idx = np.concatenate([90+np.arange(4),np.arange(-4,0)])
+		r2_vae_idx = 90 + np.arange(20)
+	elif robot_vae_args.model =='BP_YUMI':
 		dataset = buetepage_hr.YumiWindowDataset
 		hri_config.num_joints = 7
+		r2_hri_idx = np.concatenate([90+np.arange(7),np.arange(-4,0)])
+		r2_vae_idx = 90 + np.arange(35)
 	
-	train_iterator = DataLoader(dataset(robot_vae_args.src, train=True, window_length=config.WINDOW_LEN, downsample=0.2), batch_size=1, shuffle=True)
-	test_iterator = DataLoader(dataset(robot_vae_args.src, train=False, window_length=config.WINDOW_LEN, downsample=0.2), batch_size=1, shuffle=False)
+	train_dataset = dataset(train=True, window_length=config.WINDOW_LEN, downsample=0.2)
+	test_dataset = dataset(train=False, window_length=config.WINDOW_LEN, downsample=0.2)
+	
+	train_dataset.labels = []
+	for idx in range(len(train_dataset.actidx)):
+		for i in range(train_dataset.actidx[idx][0], train_dataset.actidx[idx][1]):
+			label = np.zeros((train_dataset.traj_data[i].shape[0], len(train_dataset.actidx)))
+			label[:, idx] = 1
+			train_dataset.labels.append(label)
+
+	test_dataset.labels = []
+	for idx in range(len(test_dataset.actidx)):
+		for i in range(test_dataset.actidx[idx][0], test_dataset.actidx[idx][1]):
+			label = np.zeros((test_dataset.traj_data[i].shape[0], len(test_dataset.actidx)))
+			label[:, idx] = 1
+			test_dataset.labels.append(label)
+
+	train_iterator = DataLoader(train_dataset, batch_size=1, shuffle=True)
+	test_iterator = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
 	print("Creating Model and Optimizer")
 	hri = networks.HRIDynamics(**(hri_config.__dict__)).to(device)
@@ -159,12 +183,12 @@ if __name__=='__main__':
 				test_loss, test_recon_loss, test_kl_loss, x_r2vaehri_gen, z_r2hri_samples, z_r2vae_samples, x, iters = run_iters_hri(test_iterator, hri, robot_vae, human_tdm, optimizer)
 				write_summaries_hri(writer, test_loss, test_recon_loss, test_kl_loss, x_r2vaehri_gen, x, z_r2hri_samples, z_r2vae_samples, steps_done, 'test')
 
-			checkpoint_file = os.path.join(MODELS_FOLDER, 'tdm_%0.4d.pth'%(epoch))
+			checkpoint_file = os.path.join(MODELS_FOLDER, 'hri_%0.4d.pth'%(epoch))
 			torch.save({'model': hri.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': epoch}, checkpoint_file)
 
 		print(epoch,'epochs done')
 
 	writer.flush()
 
-	checkpoint_file = os.path.join(MODELS_FOLDER, 'tdm_final.pth')
+	checkpoint_file = os.path.join(MODELS_FOLDER, 'hri_final.pth')
 	torch.save({'model': hri.state_dict(), 'optimizer': optimizer.state_dict(), 'epoch': global_step}, checkpoint_file)
