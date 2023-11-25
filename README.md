@@ -10,29 +10,11 @@ Install the requirements in [`requirements.txt`](requirements.txt) by running
 pip install -r requirements.txt
 ```
 
-Clone the repository [`https://github.com/jbutepage/human_robot_interaction_data`](https://github.com/jbutepage/human_robot_interaction_data) for the data from the paper
-
-## Data Preprocessing
-
-To preprocess the data according to the paper, run:
-
-```bash
-python data_preproc.py --dst-dir /path/to/preproc_data
-```
-
-This creates three files, `labelled_sequences.npz`, `vae_data.npz` and `tdm_data.npz`.
+Clone the repo `https://github.com/souljaboy764/phd_utils` and follow the installation instructions in its README.
 
 ## Running Training
 
-Once the data preprocessing is done, you can train the VAE by running:
+The steps for training on the Human-Human Interactions is:
 
-```bash
-python train_vae.py --src /path/to/preproc_data/vae_data.npz (--results /path/to/results_dir)
-```
-
-To visualise the resutls of the training, run the jupyter notebook []`test_hh_vae.ipynb`](./test_hh_vae.ipynb) giving the path to the trained VAE model (.pth file) when it asks for user input.
-
-## TODO
-
-- Update Code and README for running TDM
-- Update Code and README for running HRI
+1. Train the Human VAE `python train_vae.py --model HH` (replace `HH` with `NUISI_HH` or `ALAP` for the respective datasets)
+2. Train the Human TDM model `python train_vae.py --vae-ckpt /path/to/vae_ckpt` where `/path/to/vae_ckpt` is the path to the VAE checkpoint.
