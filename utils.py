@@ -103,10 +103,7 @@ def visualize_skeleton(ax, trajectory, **kwargs):
 	return ax
 
 def plotly_skeleton(fig, trajectory, update=False, **kwargs):
-	# print(kwargs)
 	# trajectory shape: W, J, D (window size x num joints x joint dims)
-	# Assuming that num joints = 4 and dims = 3
-	assert len(trajectory.shape) ==  3 and trajectory.shape[1] == 4 and trajectory.shape[2] == 3
 	for w in range(trajectory.shape[0]):
 		if update:
 			fig.update_traces(patch={'x':trajectory[w, :, 0], 'y':trajectory[w, :, 1], 'z':trajectory[w, :, 2]}, selector=kwargs['start_idx']+w)
