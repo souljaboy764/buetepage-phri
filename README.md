@@ -10,9 +10,11 @@ Install the requirements in [`requirements.txt`](requirements.txt) by running
 pip install -r requirements.txt
 ```
 
-Clone the repo `https://github.com/souljaboy764/phd_utils` and follow the installation instructions in its README.
+Clone the repo `https://github.com/souljaboy764/phd_utils` and follow the installation instructions in its README. This repository has the datasets to be used already preprocessed.
 
 ## Training
+
+First the VAE and Dynamics (TDM) are trained on the Human-Human dataset, after which the human VAE and TDM are frozen and then the HRI VAE and Dynamics are trained.
 
 ### Human-Human Interactions
 
