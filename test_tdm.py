@@ -1,125 +1,103 @@
 import torch
-import torch.nn.functional as F
-from torch.utils.data import DataLoader
-from torch.nn.utils.rnn import *
 
 import numpy as np
 import os, argparse
 
 import networks
-from utils import *
+from config import *
 
-parser = argparse.ArgumentParser(description='SKID Training')
-parser.add_argument('--vae-ckpt', type=str, metavar='CKPT', default='logs/092023/hh_20hz_3joints_xvel/',
-					help='Path to the VAE checkpoint, where the TDM models will also be saved.')
-parser.add_argument('--src', type=str, default='data/2023/hh_20hz_3joints_xvel/tdm_data.npz', metavar='DATA',
-					help='Path to read training and testin data (default: ./data/orig_bothactors/tdm_data.npz).')
+from phd_utils.dataloaders import *
+
+parser = argparse.ArgumentParser(description='Buetepage et al. (2020) Human-Human Interaction Testing')
+parser.add_argument('--tdm-ckpt', type=str, metavar='CKPT', required=True,
+					help='Path to the TDM checkpoint to test.')
 args = parser.parse_args()
 torch.manual_seed(128542)
 torch.autograd.set_detect_anomaly(True)
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-pred_mse = []
-pred_mse_nowave = []
-pred_mse_actions = [[],[],[],[]]
-best_action_mse = [1000,1000,1000,1000]
-print('Pred. MSE waving\t\tPred. MSE handshake\t\tPred. MSE rocket\t\tPred. MSE parachute')
-print('mean\tsigma\tmean\tsigma\tmean\tsigma\tmean\tsigma')
-for trial in range(4):
-	vae_model_folder = os.path.join(args.vae_ckpt, f'trial{trial}', "models")
-	vae_ckpt = os.path.join(vae_model_folder, 'final.pth')
-	tdm_models_folder = os.path.join(args.vae_ckpt, f'trial{trial}', 'tdm', "models")
-	if not os.path.exists(os.path.join(vae_model_folder, 'final.pth')):
-		print('Please use the same directory as the final VAE model. Currently using',vae_model_folder)
-		exit(-1)
+tdm_models_folder = os.path.dirname(args.tdm_ckpt)
 
-	if os.path.exists(os.path.join(tdm_models_folder,'tdm_hyperparams.npz')):
-		# print(os.path.join(tdm_models_folder,'tdm_hyperparams.npz'))
-		hyperparams = np.load(os.path.join(tdm_models_folder,'tdm_hyperparams.npz'), allow_pickle=True)
-		tdm_args = hyperparams['args'].item() # overwrite args if loading from checkpoint
-		tdm_config = hyperparams['tdm_config'].item()
-	else:
-		print(os.path.join(tdm_models_folder,'tdm_hyperparams.npz'))
-		print('No TDM configs found')
-		exit(-1)
+if os.path.exists(os.path.join(tdm_models_folder,'tdm_hyperparams.npz')):
+	# print(os.path.join(tdm_models_folder,'tdm_hyperparams.npz'))
+	hyperparams = np.load(os.path.join(tdm_models_folder,'tdm_hyperparams.npz'), allow_pickle=True)
+	tdm_args = hyperparams['args'].item() # overwrite args if loading from checkpoint
+	tdm_config = hyperparams['tdm_config'].item()
+else:
+	print(os.path.join(tdm_models_folder,'tdm_hyperparams.npz'))
+	print('No TDM configs found')
+	exit(-1)
 
-	vae_hyperparams = np.load(os.path.join(vae_model_folder,'hyperparams.npz'), allow_pickle=True)
-	vae_args = vae_hyperparams['args'].item() # overwrite args if loading from checkpoint
-	vae_config = vae_hyperparams['vae_config'].item()
+vae_hyperparams = np.load(os.path.join(os.path.dirname(os.path.dirname(tdm_models_folder)),'models', 'hyperparams.npz'), allow_pickle=True)
+vae_args = vae_hyperparams['args'].item()
+vae_config = vae_hyperparams['config'].item()
+config = vae_hyperparams['global_config'].item()
 
-	# print("Creating Model and Optimizer")
-	tdm_1 = networks.TDM(**(tdm_config.__dict__)).to(device)
-	tdm_2 = networks.TDM(**(tdm_config.__dict__)).to(device)
+tdm_1 = networks.TDM(**(tdm_config.__dict__)).to(device)
+tdm_2 = networks.TDM(**(tdm_config.__dict__)).to(device)
 
-	if os.path.exists(os.path.join(tdm_models_folder, 'tdm_final.pth')):
-		# print("Loading Checkpoints")
-		ckpt = torch.load(os.path.join(tdm_models_folder, 'tdm_final.pth'))
-		tdm_1.load_state_dict(ckpt['model_1'])
-		tdm_2.load_state_dict(ckpt['model_2'])
-		global_step = ckpt['epoch']
-	else:
-		print('No TDM model found')
-		exit(-1)
+ckpt = torch.load(args.tdm_ckpt)
+tdm_1.load_state_dict(ckpt['model_1'])
+tdm_2.load_state_dict(ckpt['model_2'])
+global_step = ckpt['epoch']
 
-	vae = networks.VAE(**(vae_config.__dict__)).to(device)
-	ckpt = torch.load(vae_ckpt)
-	vae.load_state_dict(ckpt['model'])
-	vae.eval()
+vae = networks.VAE(**(vae_config.__dict__)).to(device)
+ckpt = torch.load(tdm_args.vae_ckpt)
+vae.load_state_dict(ckpt['model'])
+vae.eval()
 
-	# print("Reading Data")
-	# with np.load(args.src, allow_pickle=True) as data:
-	# 	test_data_np = data['test_data']
-	# 	test_data = [torch.Tensor(traj) for traj in test_data_np]
-
-	from mild_hri.dataloaders import *
+if vae_args.model =='BP_HH':
+	dataset = buetepage.HHWindowDataset
+elif vae_args.model =='NUISI_HH':
+	dataset = nuisi.HHWindowDataset
+elif vae_args.model =='ALAP':
 	dataset = alap.HHWindowDataset
-	test_dataset = dataset(vae_args.src, train=False, window_length=vae_config.window_size, downsample=0.2)
-	# print(len(test_dataset.traj_data), len(test_dataset.labels))
-	# actidx = np.array([[0,7],[7,15],[15,29],[29,39]])
+test_dataset = dataset(train=False, window_length=config.WINDOW_LEN, downsample=0.2)
 
-	# print("Starting Evaluation")
-	pred_mse_actions_ckpt = []
-	for a in test_dataset.actidx:
-		pred_mse_actions_ckpt.append([])
-		for i in range(a[0],a[1]):
-			# x = test_data[i]
-			x, label = test_dataset[i]
-			x = torch.Tensor(x)
-			label = torch.Tensor(label)
-			x = torch.cat([x,label], dim=-1)
-			seq_len, dims = x.shape
-			x1_tdm = torch.Tensor(x[None,:,p1_tdm_idx]).to(device)
-			x2_vae = torch.Tensor(x[None,:,p2_vae_idx]).to(device)
-			
-			# z1_d1_dist, d1_samples, d1_dist = tdm_1(x1_tdm, lens)
-			d1_x1 = tdm_1.latent_mean(tdm_1.activation(tdm_1._encoder(x1_tdm)[0]))
-			z2_d1 = tdm_2.output_mean(tdm_2._decoder(d1_x1))
-			x2_tdm_out = vae._output(vae._decoder(z2_d1))
+test_dataset.labels = []
+for idx in range(len(test_dataset.actidx)):
+	for i in range(test_dataset.actidx[idx][0], test_dataset.actidx[idx][1]):
+		label = np.zeros((test_dataset.traj_data[i].shape[0], len(test_dataset.actidx)))
+		label[:, idx] = 1
+		test_dataset.labels.append(label)
 
-			pred_mse_actions_ckpt[-1] += ((x2_tdm_out - x2_vae)**2).reshape((seq_len, vae.window_size, vae.num_joints, vae.joint_dims)).sum(-1).mean(-1).mean(-1).detach().cpu().numpy().tolist()
 
-	pred_mse_ckpt = []
-	pred_mse_nowave_ckpt = []
-	for mse in pred_mse_actions_ckpt:
-		pred_mse_ckpt+= mse
-	for mse in pred_mse_actions_ckpt[1:]:
-		pred_mse_nowave_ckpt+= mse
-	# s = f'{trial}'#\t{np.mean(pred_mse_ckpt):.4e}\t{np.std(pred_mse_ckpt):.4e}\t{np.mean(pred_mse_nowave_ckpt):.4e}\t{np.std(pred_mse_nowave_ckpt):.4e}'
-	# for mse in pred_mse_actions_ckpt:
-	# 	s += f'\t{np.mean(mse)*100:.3f} $\pm$ {np.std(mse)*100:.3f}'
-	# print(s)
+if vae_args.model == 'BP_HH' or vae_args.model == 'NUISI_HH':
+	tdm_config = human_tdm_config()
+	p1_tdm_idx = np.concatenate([np.arange(18),np.arange(-4,0)])
+	p2_tdm_idx = np.concatenate([90+np.arange(18),np.arange(-4,0)])
+	p1_vae_idx = np.arange(90)
+	p2_vae_idx = np.arange(90) + 90
+elif vae_args.model == 'ALAP':
+	tdm_config = handover_tdm_config()
+	p1_tdm_idx = np.concatenate([np.arange(36),np.arange(-2,0)])
+	p2_tdm_idx = np.concatenate([180+np.arange(36),np.arange(-2,0)])
+	p1_vae_idx = np.arange(180)
+	p2_vae_idx = np.arange(180) + 180
 
-	pred_mse += pred_mse_ckpt
-	pred_mse_nowave += pred_mse_nowave_ckpt
-	for i in range(len(pred_mse_actions_ckpt)):
-		if best_action_mse[i] > np.mean(pred_mse_actions_ckpt[i]):
-			best_action_mse[i] = np.mean(pred_mse_actions_ckpt[i])
-			pred_mse_actions[i] = pred_mse_actions_ckpt[i]
+pred_mse_actions_ckpt = []
+for a in test_dataset.actidx:
+	pred_mse_actions_ckpt.append([])
+	for i in range(a[0],a[1]):
+		# x = test_data[i]
+		x, label = test_dataset[i]
+		x = torch.Tensor(x)
+		label = torch.Tensor(label)
+		x = torch.cat([x,label], dim=-1)
+		seq_len, dims = x.shape
+		x1_tdm = torch.Tensor(x[None,:,p1_tdm_idx]).to(device)
+		x2_vae = torch.Tensor(x[None,:,p2_vae_idx]).to(device)
+		
+		# z1_d1_dist, d1_samples, d1_dist = tdm_1(x1_tdm, lens)
+		d1_x1 = tdm_1.latent_mean(tdm_1.activation(tdm_1._encoder(x1_tdm)[0]))
+		z2_d1 = tdm_2.output_mean(tdm_2._decoder(d1_x1))
+		x2_tdm_out = vae._output(vae._decoder(z2_d1))
+
+		pred_mse_actions_ckpt[-1] += ((x2_tdm_out - x2_vae)**2).reshape((seq_len, vae.window_size, vae.num_joints, vae.joint_dims)).sum(-1).mean(-1).mean(-1).detach().cpu().numpy().tolist()
 
 s = ''
-for mse in pred_mse_actions:
+for mse in pred_mse_actions_ckpt:
 	if len(mse) ==0:
 		continue
-	s += f'\t{np.mean(mse)*100:.3f} $\pm$ {np.std(mse)*100:.3f}'
-print(s)
-np.savez_compressed('logs/mse/hh_20hz_3joints_xvel.npz', np.array(pred_mse_actions, dtype=object))
+	s += f'{np.mean(mse)*100:.3f} $\pm$ {np.std(mse)*100:.3f}\t'
+print(s) # prints the Mean squared error and standard deviation for each interaction in the dataset

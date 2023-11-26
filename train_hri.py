@@ -67,7 +67,7 @@ if __name__=='__main__':
 	parser.add_argument('--robot-ckpt', type=str, metavar='ROBOT-CKPT', required=True,
 						help='Path to the robot VAE checkpoint, where the TDM models will also be saved.')
 	args = parser.parse_args()
-	torch.manual_seed(128542)
+	seed = np.random.randint(0,np.iinfo(np.int32).max)
 	torch.autograd.set_detect_anomaly(True)
 	device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

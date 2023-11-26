@@ -77,7 +77,7 @@ if __name__=='__main__':
 	parser.add_argument('--ckpt', type=str, default=None, metavar='CKPT',
 						help='Checkpoint to load model weights. (default: None)')
 	args = parser.parse_args()
-	torch.manual_seed(42) # answer to life universe and everything OP
+	seed = np.random.randint(0,np.iinfo(np.int32).max)
 	torch.autograd.set_detect_anomaly(True)
 
 	config = global_config()
