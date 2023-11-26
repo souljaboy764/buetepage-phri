@@ -4,6 +4,7 @@ from torch.nn import functional as F
 from torch.distributions import Normal, kl_divergence
 from torch.nn.utils.rnn import pad_packed_sequence
 
+# HRI Dynamics Model for Human-Robot Interactions
 class HRIDynamics(nn.Module):
 	def __init__(self, **kwargs):
 		super(HRIDynamics, self).__init__()

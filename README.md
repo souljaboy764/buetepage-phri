@@ -59,3 +59,9 @@ The output of the below testing codes is the Mean squared prediction error and s
 ```bash
 python test_tdm.py --tdm-ckpt /path/to/human_vae_ckpt/tdm/models/tdm_XXXX.pth
 ```
+
+### Human-Robot Interactions
+
+```bash
+python test_hri.py --tdm-ckpt /path/to/robot_vae_ckpt/dynamics/models/tdm_XXXX.pth
+```

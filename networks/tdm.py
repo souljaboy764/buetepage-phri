@@ -4,6 +4,7 @@ from torch.nn import functional as F
 from torch.distributions import Normal, kl_divergence
 from torch.nn.utils.rnn import pad_packed_sequence
 
+# Temporal Dynamics Model for Human-Human Interactions
 class TDM(nn.Module):
 	def __init__(self, **kwargs):
 		super(TDM, self).__init__()
