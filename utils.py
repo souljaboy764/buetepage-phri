@@ -2,13 +2,11 @@ import torch
 
 import numpy as np
 
-import matplotlib.pyplot as plt
-from matplotlib.cm import get_cmap
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-colors_10 = get_cmap('tab10')
+
 # p1_tdm_idx = np.concatenate([np.arange(12),np.arange(-5,0)])
 # p2_tdm_idx = np.concatenate([480+np.arange(12),np.arange(-5,0)])
 # p1_vae_idx = np.arange(480)
@@ -54,16 +52,6 @@ def write_summaries_vae(writer, recon, kl, loss, x_gen, zx_samples, x, steps_don
 	writer.add_scalar(prefix+'/kl_div', sum(kl), steps_done)
 	writer.add_scalar(prefix+'/recon_loss', sum(recon), steps_done)
 
-def prepare_axis():
-	fig = plt.figure()
-	ax = fig.add_subplot(1,2,1, projection='3d')
-	# plt.ion()
-	ax.view_init(25, -155)
-	ax.set_xlim3d([-0.05, 0.75])
-	ax.set_ylim3d([-0.3, 0.5])
-	ax.set_zlim3d([-0.8, 0.2])
-	return fig, ax
-
 def prepare_axis_plotly():
 	fig = make_subplots(rows=1, cols=1,
 					specs=[[{'is_3d': True}]],
@@ -77,30 +65,6 @@ def prepare_axis_plotly():
 		)
 	)
 	return fig
-
-def reset_axis(ax, variant = None, action = None, frame_idx = None):
-	xlim = ax.get_xlim()
-	ylim = ax.get_ylim()
-	zlim = ax.get_zlim()
-	ax.cla()
-	ax.set_xlabel('X')
-	ax.set_ylabel('Y')
-	ax.set_zlabel('Z')
-	ax.set_facecolor('none')
-	ax.set_xlim3d(xlim)
-	ax.set_ylim3d(ylim)
-	ax.set_zlim3d(zlim)
-	title = ""
-	if variant is not None and action is not None and frame_idx is not None:
-		ax.set_title(variant + " " + action + "\nFrame: {}".format(frame_idx))
-	return ax
-
-def visualize_skeleton(ax, trajectory, **kwargs):
-	# trajectory shape: W, J, D (window size x num joints x joint dims)
-	for w in range(trajectory.shape[0]):
-		ax.plot(trajectory[w, :, 0], trajectory[w, :, 1], trajectory[w, :, 2], color='k', marker='o', alpha=(w+1)/trajectory.shape[0], **kwargs)
-	
-	return ax
 
 def plotly_skeleton(fig, trajectory, update=False, **kwargs):
 	# trajectory shape: W, J, D (window size x num joints x joint dims)
